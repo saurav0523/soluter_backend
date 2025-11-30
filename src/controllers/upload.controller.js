@@ -68,6 +68,15 @@ const uploadDocument = async (req, res, next) => {
     // Parallel processing: Generate embeddings
     const embeddings = await embedService.generateEmbeddings(chunks);
 
+    // Validate embeddings
+    if (!embeddings || embeddings.length === 0) {
+      throw new Error('Failed to generate embeddings for document');
+    }
+
+    if (embeddings.length !== chunks.length) {
+      console.warn(`Warning: Generated ${embeddings.length} embeddings for ${chunks.length} chunks. Some chunks may be missing embeddings.`);
+    }
+
     // Batch insert chunks using transaction for better performance
     const BATCH_SIZE = 50;
     
@@ -77,9 +86,17 @@ const uploadDocument = async (req, res, next) => {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
         
-        // Build batch insert query
+        // Build batch insert query - filter out chunks without embeddings
         const insertPromises = batch.map((chunk, idx) => {
-          const embeddingString = `[${batchEmbeddings[idx].join(',')}]`;
+          const embedding = batchEmbeddings[idx];
+          
+          // Skip if embedding is missing or invalid
+          if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+            console.warn(`Skipping chunk ${i + idx}: embedding is missing or invalid`);
+            return null;
+          }
+
+          const embeddingString = `[${embedding.join(',')}]`;
           return tx.$executeRawUnsafe(
             `INSERT INTO "Chunk" (id, "documentId", content, embedding, "chunkIndex", "createdAt")
              VALUES (gen_random_uuid()::text, $1, $2, $3::vector(768), $4, NOW())`,
@@ -88,10 +105,12 @@ const uploadDocument = async (req, res, next) => {
             embeddingString,
             i + idx
           );
-        });
+        }).filter(promise => promise !== null); // Remove null promises
         
         // Execute batch in parallel within transaction
-        await Promise.all(insertPromises);
+        if (insertPromises.length > 0) {
+          await Promise.all(insertPromises);
+        }
       }
     });
 
