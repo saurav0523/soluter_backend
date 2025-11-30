@@ -1,0 +1,45 @@
+{
+  "name": "soluter-backend",
+  "version": "1.0.0",
+  "description": "Backend API for document processing and RAG system",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "worker": "node src/workers/queue.worker.js",
+    "worker:timeout": "node src/workers/timeout.worker.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "keywords": [
+    "rag",
+    "document-processing",
+    "ollama",
+    "prisma"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@langchain/textsplitters": "^1.0.0",
+    "@prisma/client": "^5.22.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "@google-cloud/storage": "^7.7.0",
+    "ioredis": "^5.3.2",
+    "multer": "^1.4.5-lts.1",
+    "ollama": "^0.6.3",
+    "pdf-parse": "^1.1.4",
+    "pg": "^8.16.3",
+    "pgvector": "^0.2.1",
+    "prisma": "^5.22.0",
+    "prisma-extension-pgvector": "^0.11.0",
+    "tesseract.js": "^5.1.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

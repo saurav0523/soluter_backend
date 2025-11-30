@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  fileName   String
+  fileType   String
+  filePath   String
+  text       String
+  chunkCount Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  chunks     Chunk[]
+  queries    Query[]
+}
+
+model Chunk {
+  id              String                @id @default(cuid())
+  documentId      String
+  content         String
+  embedding       Unsupported("vector")
+  chunkIndex      Int
+  createdAt       DateTime              @default(now())
+  document        Document              @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sourceRelations Relationship[]        @relation("SourceChunk")
+  targetRelations Relationship[]        @relation("TargetChunk")
+
+  @@index([documentId, chunkIndex], map: "chunk_doc_index_idx")
+  @@index([documentId], map: "chunk_document_idx")
+  @@index([embedding], map: "chunk_embedding_idx")
+  @@index([chunkIndex], map: "chunk_index_idx")
+}
+
+model Relationship {
+  id               String   @id @default(cuid())
+  sourceChunkId    String
+  targetChunkId    String
+  relationshipType String
+  strength         Float    @default(1.0)
+  createdAt        DateTime @default(now())
+  sourceChunk      Chunk    @relation("SourceChunk", fields: [sourceChunkId], references: [id], onDelete: Cascade)
+  targetChunk      Chunk    @relation("TargetChunk", fields: [targetChunkId], references: [id], onDelete: Cascade)
+
+  @@index([sourceChunkId])
+  @@index([targetChunkId])
+  @@index([sourceChunkId], map: "relationship_source_idx")
+  @@index([targetChunkId], map: "relationship_target_idx")
+}
+
+model Query {
+  id                String                @id @default(cuid())
+  question          String
+  questionEmbedding Unsupported("vector")
+  documentId        String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  feedbacks         Feedback[]
+  document          Document?             @relation(fields: [documentId], references: [id])
+  answers           QueryAnswer[]
+
+  @@index([documentId])
+  @@index([questionEmbedding], map: "query_embedding_idx")
+}
+
+model QueryAnswer {
+  id            String     @id @default(cuid())
+  queryId       String
+  answer        String
+  contextChunks String[]
+  qualityScore  Float?
+  usageCount    Int        @default(0)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  feedbacks     Feedback[]
+  query         Query      @relation(fields: [queryId], references: [id], onDelete: Cascade)
+
+  @@index([queryId])
+  @@index([qualityScore])
+}
+
+model Feedback {
+  id         String       @id @default(cuid())
+  queryId    String
+  answerId   String?
+  rating     Int
+  isHelpful  Boolean
+  correction String?
+  userNotes  String?
+  createdAt  DateTime     @default(now())
+  answer     QueryAnswer? @relation(fields: [answerId], references: [id])
+  query      Query        @relation(fields: [queryId], references: [id], onDelete: Cascade)
+
+  @@index([queryId])
+  @@index([answerId])
+  @@index([isHelpful])
+}
