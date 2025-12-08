@@ -1,24 +1,18 @@
-// Import env first to ensure environment variables are loaded
-import './env.js';
 import { PrismaClient } from '@prisma/client';
-import { config } from './env.js';
 
-// Enhanced Prisma client with connection pooling
 const prisma = new PrismaClient({
-  log: config.nodeEnv === 'development' ? ['query', 'error', 'warn'] : ['error'],
+  log: process.env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   datasources: {
     db: {
-      url: config.databaseUrl,
+      url: process.env.DATABASE_URL,
     },
   },
 });
 
-// Connection pooling configuration
 prisma.$connect()
   .then(async () => {
     console.log('Database connected successfully');
     
-    // Create vector indexes for performance (if not exists)
     try {
       await prisma.$executeRawUnsafe(`
         CREATE INDEX IF NOT EXISTS chunk_embedding_idx 
@@ -33,8 +27,7 @@ prisma.$connect()
       `);
       
       console.log('Vector indexes created/verified');
-    } catch (error) {
-      // Indexes might already exist or pgvector version might use HNSW
+    } catch (error) {   
       console.log('Note: Vector indexes setup -', error.message);
     }
   })

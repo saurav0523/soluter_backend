@@ -77,41 +77,53 @@ const uploadDocument = async (req, res, next) => {
       console.warn(`Warning: Generated ${embeddings.length} embeddings for ${chunks.length} chunks. Some chunks may be missing embeddings.`);
     }
 
-    // Batch insert chunks using transaction for better performance
-    const BATCH_SIZE = 50;
+    // Batch insert chunks using optimized transaction
+    // Calculate timeout based on number of chunks (minimum 30 seconds, +1 second per 10 chunks)
+    const transactionTimeout = Math.max(30000, 30000 + Math.ceil(chunks.length / 10) * 1000);
+    const BATCH_SIZE = 100; // Increased batch size for better performance
     
-    // Use transaction for atomicity and better performance
+    // Use transaction with increased timeout for large documents
     await prisma.$transaction(async (tx) => {
       for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
         
-        // Build batch insert query - filter out chunks without embeddings
-        const insertPromises = batch.map((chunk, idx) => {
-          const embedding = batchEmbeddings[idx];
-          
-          // Skip if embedding is missing or invalid
-          if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-            console.warn(`Skipping chunk ${i + idx}: embedding is missing or invalid`);
-            return null;
-          }
-
-          const embeddingString = `[${embedding.join(',')}]`;
-          return tx.$executeRawUnsafe(
-            `INSERT INTO "Chunk" (id, "documentId", content, embedding, "chunkIndex", "createdAt")
-             VALUES (gen_random_uuid()::text, $1, $2, $3::vector(768), $4, NOW())`,
-            document.id,
+        // Filter out chunks without valid embeddings and prepare for batch insert
+        const validChunks = batch
+          .map((chunk, idx) => ({
             chunk,
-            embeddingString,
-            i + idx
-          );
-        }).filter(promise => promise !== null); // Remove null promises
+            embedding: batchEmbeddings[idx],
+            index: i + idx
+          }))
+          .filter(item => item.embedding && Array.isArray(item.embedding) && item.embedding.length > 0);
         
-        // Execute batch in parallel within transaction
-        if (insertPromises.length > 0) {
+        if (validChunks.length === 0) {
+          continue;
+        }
+        
+        // Use parallel inserts but with smaller concurrency to avoid overwhelming the database
+        const CONCURRENT_INSERTS = 10; // Process 10 inserts at a time
+        for (let j = 0; j < validChunks.length; j += CONCURRENT_INSERTS) {
+          const concurrentBatch = validChunks.slice(j, j + CONCURRENT_INSERTS);
+          
+          const insertPromises = concurrentBatch.map((item) => {
+            const embeddingString = `[${item.embedding.join(',')}]`;
+            return tx.$executeRawUnsafe(
+              `INSERT INTO "Chunk" (id, "documentId", content, embedding, "chunkIndex", "createdAt")
+               VALUES (gen_random_uuid()::text, $1, $2, $3::vector(768), $4, NOW())`,
+              document.id,
+              item.chunk,
+              embeddingString,
+              item.index
+            );
+          });
+          
           await Promise.all(insertPromises);
         }
       }
+    }, {
+      timeout: transactionTimeout,
+      maxWait: transactionTimeout
     });
 
     // Build relationships in background (non-blocking)

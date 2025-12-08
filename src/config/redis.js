@@ -1,14 +1,10 @@
-// Import env first to ensure environment variables are loaded
-import './env.js';
 import Redis from 'ioredis';
-import { config } from './env.js';
 
-// Create Redis client with connection pooling
 const redis = new Redis({
-  host: config.redisHost || 'localhost',
-  port: config.redisPort || 6379,
-  password: config.redisPassword || undefined,
-  db: config.redisDb || 0,
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT) || 6379,
+  password: process.env.REDIS_PASSWORD || undefined,
+  db: parseInt(process.env.REDIS_DB) || 0,
   retryStrategy: (times) => {
     const delay = Math.min(times * 50, 2000);
     return delay;

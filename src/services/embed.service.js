@@ -1,9 +1,5 @@
 import ollama from 'ollama';
-import { config } from '../config/env.js';
 import redisCache from './redis-cache.service.js';
-
-const OLLAMA_BASE_URL = config.ollamaBaseUrl;
-const EMBEDDING_MODEL = config.ollamaEmbeddingModel;
 
 // Optimized batch size based on model capacity
 const OPTIMAL_BATCH_SIZE = 10;
@@ -11,6 +7,10 @@ const MAX_CONCURRENT_REQUESTS = 20;
 
 const generateEmbeddings = async (chunks) => {
   try {
+    const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL;
+    const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
+
+
     if (!chunks || chunks.length === 0) {
       return [];
     }

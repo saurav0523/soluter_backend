@@ -1,6 +1,5 @@
 // Cloud Storage Service - Google Cloud Storage (GCS) for PDF/file storage
 import { Storage } from '@google-cloud/storage';
-import { config } from '../config/env.js';
 import fs from 'fs/promises';
 import path from 'path';
 
@@ -9,13 +8,13 @@ let storage = null;
 let bucketName = null;
 let useCloudStorage = false;
 
-if (config.gcsBucketName && config.gcsCredentialsPath) {
+if (process.env.GCS_BUCKET_NAME && process.env.GCS_CREDENTIALS_PATH) {
   try {
     storage = new Storage({
-      keyFilename: config.gcsCredentialsPath,
-      projectId: config.gcsProjectId,
+      keyFilename: process.env.GCS_CREDENTIALS_PATH,
+      projectId: process.env.GCS_PROJECT_ID,
     });
-    bucketName = config.gcsBucketName;
+    bucketName = process.env.GCS_BUCKET_NAME;
     useCloudStorage = true;
     console.log('Google Cloud Storage initialized');
   } catch (error) {

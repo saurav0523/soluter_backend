@@ -1,11 +1,15 @@
 import ollama from 'ollama';
-import { config } from '../config/env.js';
-
-const OLLAMA_BASE_URL = config.ollamaBaseUrl;
-const OLLAMA_MODEL = config.ollamaModel;
 
 const generateAnswer = async (question, context, similarExamples = []) => {
   try {
+    // Read environment variables at runtime to ensure they're loaded
+    const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL;
+    const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
+
+    // Validate required environment variables
+    if (!OLLAMA_MODEL) {
+      throw new Error('OLLAMA_MODEL environment variable is not set. Please set it in your .env file (e.g., OLLAMA_MODEL=llama2)');
+    }
     let contextText;
     
     if (typeof context === 'string') {
@@ -90,6 +94,13 @@ Now solve this problem step-by-step:`;
 
     return response.response || 'Unable to generate answer.';
   } catch (error) {
+    // Provide helpful error messages for common issues
+    if (error.message && error.message.includes('not found')) {
+      throw new Error(`LLM model '${process.env.OLLAMA_MODEL}' not found. Please ensure Ollama is running and the model is installed. Run: ollama pull ${process.env.OLLAMA_MODEL}`);
+    }
+    if (error.message && error.message.includes('connection')) {
+      throw new Error(`Cannot connect to Ollama at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Make sure Ollama is running: ollama serve`);
+    }
     throw new Error(`LLM answer generation failed: ${error.message}`);
   }
 };
