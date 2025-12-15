@@ -56,12 +56,12 @@ const startWorker = async () => {
 
   while (!shouldStop) {
     try {
-      const docJob = await redisQueue.popDocumentJob(5); // 5 second timeout
+      const docJob = await redisQueue.popDocumentJob(5);
       if (docJob) {
         await processDocumentJob(docJob);
       }
 
-      const feedbackJob = await redisQueue.popFeedbackJob(1); // 1 second timeout
+      const feedbackJob = await redisQueue.popFeedbackJob(1);
       if (feedbackJob) {
         await processFeedbackJob(feedbackJob);
       }

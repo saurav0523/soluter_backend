@@ -1,16 +1,14 @@
-// Cloudflare R2 Storage Service (S3-compatible)
+
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs/promises';
 import path from 'path';
-
-// Initialize R2 client (S3-compatible)
+  
 let r2Client = null;
 let bucketName = null;
 let useCloudStorage = false;
 
 if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
   try {
-    // Use R2_ENDPOINT if provided, otherwise build from R2_ACCOUNT_ID
     const endpoint = process.env.R2_ENDPOINT || 
                      `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
     
@@ -34,20 +32,14 @@ if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
   }
 }
 
-/**
- * Upload file to R2 or keep local
- */
 export const uploadFile = async (filePath, fileName, documentId) => {
   try {
     if (useCloudStorage && r2Client) {
-      // Upload to R2
       const fileExtension = path.extname(fileName);
       const cloudFileName = `documents/${documentId}${fileExtension}`;
       
-      // Read file
       const fileContent = await fs.readFile(filePath);
       
-      // Upload to R2
       await r2Client.send(new PutObjectCommand({
         Bucket: bucketName,
         Key: cloudFileName,
@@ -59,12 +51,10 @@ export const uploadFile = async (filePath, fileName, documentId) => {
         },
       }));
 
-      // Get R2 URL (use R2_ENDPOINT if provided, otherwise build from R2_ACCOUNT_ID)
       const baseUrl = process.env.R2_ENDPOINT || 
                       `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
       const r2Url = `${baseUrl}/${bucketName}/${cloudFileName}`;
       
-      // Delete local file after successful upload
       try {
         await fs.unlink(filePath);
       } catch (error) {
@@ -78,7 +68,6 @@ export const uploadFile = async (filePath, fileName, documentId) => {
         cloudPath: cloudFileName,
       };
     } else {
-      // Use local storage
       return {
         filePath: filePath,
         storageType: 'local',
@@ -86,7 +75,6 @@ export const uploadFile = async (filePath, fileName, documentId) => {
     }
   } catch (error) {
     console.error('File upload to R2 failed:', error);
-    // Fallback to local storage
     return {
       filePath: filePath,
       storageType: 'local',
@@ -94,25 +82,19 @@ export const uploadFile = async (filePath, fileName, documentId) => {
   }
 };
 
-/**
- * Download file from R2 or read local
- */
 export const getFile = async (filePath, storageType = 'local') => {
   try {
     if (storageType === 'r2' && r2Client) {
-      // Extract key from R2 URL
       const urlMatch = filePath.match(/\/([^/]+\/[^/]+)$/);
       
       if (urlMatch) {
         const key = urlMatch[1];
         
-        // Download from R2
         const response = await r2Client.send(new GetObjectCommand({
           Bucket: bucketName,
           Key: key,
         }));
         
-        // Save to temp file
         const tempPath = `/tmp/${path.basename(key)}`;
         const fileContent = await response.Body.transformToByteArray();
         await fs.writeFile(tempPath, fileContent);
@@ -121,7 +103,6 @@ export const getFile = async (filePath, storageType = 'local') => {
       }
     }
     
-    // Local file or fallback
     return filePath;
   } catch (error) {
     console.error('File download from R2 failed:', error);
@@ -129,9 +110,6 @@ export const getFile = async (filePath, storageType = 'local') => {
   }
 };
 
-/**
- * Delete file from R2 or local
- */
 export const deleteFile = async (filePath, storageType = 'local') => {
   try {
     if (storageType === 'r2' && r2Client) {
@@ -146,7 +124,6 @@ export const deleteFile = async (filePath, storageType = 'local') => {
         return true;
       }
     } else {
-      // Delete local file
       try {
         await fs.unlink(filePath);
         return true;
@@ -161,9 +138,6 @@ export const deleteFile = async (filePath, storageType = 'local') => {
   }
 };
 
-/**
- * Get content type from file extension
- */
 const getContentType = (extension) => {
   const contentTypes = {
     '.pdf': 'application/pdf',
@@ -177,10 +151,7 @@ const getContentType = (extension) => {
   };
   return contentTypes[extension.toLowerCase()] || 'application/octet-stream';
 };
-
-/**
- * Check if cloud storage is available
- */
+  
 export const isCloudStorageEnabled = () => {
   return useCloudStorage && r2Client !== null;
 };

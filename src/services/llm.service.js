@@ -1,11 +1,11 @@
 const HF_CHAT_URL = process.env.HF_CHAT_URL || 'https://router.huggingface.co/v1/chat/completions';
-const HF_API_KEY = process.env.HF_API_KEY;
-const HF_FAST_MODEL = process.env.HF_FAST_MODEL;       // e.g. Qwen/Qwen2.5-7B-Instruct
-const HF_ACCURATE_MODEL = process.env.HF_ACCURATE_MODEL; // e.g. Qwen/Qwen2.5-14B-Instruct
+const HF_API_KEY = process.env.HF_CHAT_API_KEY || process.env.HF_API_KEY;
+const HF_FAST_MODEL = process.env.HF_FAST_MODEL;
+const HF_ACCURATE_MODEL = process.env.HF_ACCURATE_MODEL;
 
 const ensureEnv = () => {
   if (!HF_API_KEY) {
-    throw new Error('HF_API_KEY is not set in environment (.env).');
+    throw new Error('HF_CHAT_API_KEY is not set in environment (.env).');
   }
   if (!HF_FAST_MODEL || !HF_ACCURATE_MODEL) {
     throw new Error('HF_FAST_MODEL and HF_ACCURATE_MODEL must be set in .env.');
@@ -118,7 +118,6 @@ const shouldEscalateToAccurate = ({ similarities, answer, question }) => {
 
   const qLower = (question || '').toLowerCase();
   
-  // Keywords that indicate need for higher accuracy
   const complexKeywords = [
     'calculate', 'computation', 'taxable', 'capital gain', 'income tax',
     'assessment year', 'deduction', 'exemption', 'financial year',
@@ -128,10 +127,6 @@ const shouldEscalateToAccurate = ({ similarities, answer, question }) => {
 
   const isComplex = complexKeywords.some(k => qLower.includes(k));
 
-  // Escalate if:
-  // 1. Low similarity (< 0.75)
-  // 2. Answer indicates uncertainty
-  // 3. Question involves complex calculations or legal matters
   if (avgScore < 0.75) return true;
   if (answer && answer.includes('I cannot find')) return true;
   if (isComplex) return true;
@@ -160,7 +155,6 @@ const generateAnswer = async (question, context, similarExamples = [], similarit
 
     const prompt = buildPrompt(contextText, question);
 
-    // Step 1: fast path (7B)
     const fastAnswer = await callHFChat(HF_FAST_MODEL, prompt);
 
     const escalate = shouldEscalateToAccurate({
@@ -176,7 +170,6 @@ const generateAnswer = async (question, context, similarExamples = [], similarit
       };
     }
 
-    // Step 2: high-accuracy path (14B)
     const accurateAnswer = await callHFChat(HF_ACCURATE_MODEL, prompt);
 
     return {

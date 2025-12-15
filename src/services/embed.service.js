@@ -23,7 +23,6 @@ const normalizeEmbedding = (embedding) => {
   return embedding.map(v => (Number(v) || 0) / norm);
 };
 
-// Generate single embedding using HuggingFace or Ollama
 const generateSingleEmbedding = async (text) => {
   const USE_CLOUD_EMBEDDINGS = process.env.USE_CLOUD_EMBEDDINGS === 'true';
   const HF_API_KEY = process.env.HF_API_KEY;
@@ -32,36 +31,34 @@ const generateSingleEmbedding = async (text) => {
   const OLLAMA_EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
 
   if (USE_CLOUD_EMBEDDINGS && HF_API_KEY) {
-    // HuggingFace Inference API (Production) - Uses SAME token as LLM
-    const response = await fetch(
-      `https://api-inference.huggingface.co/pipeline/feature-extraction/${HF_EMBEDDING_MODEL}`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${HF_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ inputs: text }),
-      }
-    );
+    const response = await fetch('https://api.jina.ai/v1/embeddings', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${HF_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        input: text,
+        model: 'jina-embeddings-v3',
+        task: 'text-matching',
+        dimensions: 768,
+      }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      throw new Error(`HuggingFace API error (${response.status}): ${errorText}`);
+      throw new Error(`Jina AI API error (${response.status}): ${errorText}`);
     }
 
-    const embedding = await response.json();
-    
-    // HF returns embedding directly as array
-    if (Array.isArray(embedding)) {
-      return normalizeEmbedding(embedding);
-    } else if (embedding.embeddings && Array.isArray(embedding.embeddings[0])) {
-      return normalizeEmbedding(embedding.embeddings[0]);
+    const data = await response.json();
+    const embedding = data?.data?.[0]?.embedding;
+
+    if (!embedding || !Array.isArray(embedding)) {
+      throw new Error('Invalid Jina AI embedding response format');
     }
-    
-    throw new Error('Invalid HuggingFace embedding response format');
+
+    return normalizeEmbedding(embedding);
   } else {
-    // Local Ollama (Development)
     const response = await ollama.embeddings({
       model: OLLAMA_EMBEDDING_MODEL,
       prompt: text,
@@ -84,7 +81,6 @@ const generateEmbeddings = async (chunks) => {
       return [];
     }
 
-    // Single chunk - fast path with caching
     if (chunks.length === 1) {
       const cached = await redisCache.getCachedEmbedding(chunks[0]);
       if (cached) {
@@ -96,7 +92,6 @@ const generateEmbeddings = async (chunks) => {
       return [embedding];
     }
 
-    // Multiple chunks - batch processing with caching
     const embeddings = [];
     const batches = [];
     

@@ -1,14 +1,10 @@
-// Redis queue service for background job processing
+
 import redis from '../config/redis.js';
 
-// Queue names
 const QUEUE_DOCUMENT_PROCESSING = 'queue:document:processing';
 const QUEUE_FEEDBACK_PROCESSING = 'queue:feedback:processing';
 const QUEUE_WEBHOOK = 'queue:webhook';
 
-/**
- * Push document processing job to queue
- */
 export const pushDocumentJob = async (documentId, fileName) => {
   try {
     const job = {
@@ -24,9 +20,6 @@ export const pushDocumentJob = async (documentId, fileName) => {
   }
 };
 
-/**
- * Pop document processing job from queue (blocking)
- */
 export const popDocumentJob = async (timeout = 0) => {
   try {
     const result = await redis.brpop(QUEUE_DOCUMENT_PROCESSING, timeout);
@@ -40,9 +33,6 @@ export const popDocumentJob = async (timeout = 0) => {
   }
 };
 
-/**
- * Push feedback processing job
- */
 export const pushFeedbackJob = async (queryId, answerId, feedback) => {
   try {
     const job = {
@@ -59,9 +49,6 @@ export const pushFeedbackJob = async (queryId, answerId, feedback) => {
   }
 };
 
-/**
- * Pop feedback processing job
- */
 export const popFeedbackJob = async (timeout = 0) => {
   try {
     const result = await redis.brpop(QUEUE_FEEDBACK_PROCESSING, timeout);
@@ -75,9 +62,6 @@ export const popFeedbackJob = async (timeout = 0) => {
   }
 };
 
-/**
- * Push webhook job (simulate webhook call)
- */
 export const pushWebhookJob = async (event, data) => {
   try {
     const job = {
@@ -94,9 +78,6 @@ export const pushWebhookJob = async (event, data) => {
   }
 };
 
-/**
- * Pop webhook job
- */
 export const popWebhookJob = async (timeout = 0) => {
   try {
     const result = await redis.brpop(QUEUE_WEBHOOK, timeout);
@@ -110,9 +91,6 @@ export const popWebhookJob = async (timeout = 0) => {
   }
 };
 
-/**
- * Get queue length
- */
 export const getQueueLength = async (queueName) => {
   try {
     return await redis.llen(queueName);
@@ -121,10 +99,7 @@ export const getQueueLength = async (queueName) => {
     return 0;
   }
 };
-
-/**
- * Get all queue lengths
- */
+  
 export const getAllQueueLengths = async () => {
   try {
     const [doc, feedback, webhook] = await Promise.all([

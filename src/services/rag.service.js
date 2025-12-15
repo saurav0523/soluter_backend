@@ -86,7 +86,6 @@ const cosineSimFromArrays = (a, b) => {
 
 const retrieveContext = async (question, documentId = null, options = {}) => {
   try {
-    // Check cache first
     const cached = await redisCache.getCachedQuery(question, documentId);
     if (cached) {
       return cached;
@@ -97,7 +96,6 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
     const vectorDim = options.vectorDim ?? 768;
     const useReranking = options.useReranking ?? true;
 
-    // Use provided embedding if available (for parallel operations), otherwise generate
     let qEmb;
     if (options.questionEmbedding) {
       qEmb = options.questionEmbedding;
@@ -195,7 +193,6 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
     merged.sort((a, b) => (b.score || 0) - (a.score || 0));
 
     const topScore = merged[0]?.score ?? 0;
-    // Push quality up: use global similarity threshold + adaptive factor
     const adaptiveThreshold = Math.max(SIMILARITY_THRESHOLD, topScore * 0.6);
 
     let finalChunks = merged
@@ -206,14 +203,12 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
       finalChunks = merged.slice(0, Math.min(MIN_CONTEXT_CHUNKS, merged.length));
     }
 
-    // Apply re-ranking for better context selection
     if (useReranking && finalChunks.length > topK) {
       finalChunks = await rerankService.rerankChunks(question, finalChunks, topK);
     } else {
       finalChunks = finalChunks.slice(0, topK);
     }
-
-    // Cache the result
+    
     await redisCache.cacheQuery(question, documentId, finalChunks);
 
     return finalChunks;

@@ -7,12 +7,6 @@ const STOP_WORDS = new Set([
   'shall', 'will', 'would', 'into', 'onto', 'over', 'under', 'through'
 ]);
 
-/**
- * Calculate keyword overlap between answer and context
- * @param {string} answer - LLM generated answer
- * @param {string} contextText - Context used for generation
- * @returns {number} Overlap ratio (0-1)
- */
 const keywordOverlap = (answer, contextText) => {
   if (!answer || !contextText) return 0;
   
@@ -31,14 +25,6 @@ const keywordOverlap = (answer, contextText) => {
   return matchedWords.length / uniqueWords.length;
 };
 
-/**
- * Compute confidence score for RAG answer
- * @param {Object} params
- * @param {number[]} params.similarities - Similarity scores of retrieved chunks
- * @param {string} params.answer - Generated answer
- * @param {string} params.contextText - Context text used for generation
- * @returns {Object} Confidence score and details
- */
 const computeConfidence = ({ similarities = [], answer, contextText }) => {
   if (!similarities.length) {
     return {
@@ -86,12 +72,6 @@ const computeConfidence = ({ similarities = [], answer, contextText }) => {
   };
 };
 
-/**
- * Check if answer should be rejected based on confidence
- * @param {number} confidence - Confidence score (0-1)
- * @param {string} answer - Generated answer
- * @returns {boolean} True if answer should be rejected
- */
 const shouldRejectAnswer = (confidence, answer) => {
   if (confidence < 0.3) return true;
   

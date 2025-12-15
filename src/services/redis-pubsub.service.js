@@ -1,19 +1,14 @@
-// Redis pub/sub service for real-time updates
+
 import redis from '../config/redis.js';
 
-// Create separate subscriber client (required for pub/sub)
 const subscriber = redis.duplicate();
 const publisher = redis.duplicate();
 
-// Channel names
 const CHANNEL_QUERY_NEW = 'query:new';
 const CHANNEL_QUERY_UPDATED = 'query:updated';
 const CHANNEL_ANSWER_UPDATED = 'answer:updated';
 const CHANNEL_DOCUMENT_PROCESSED = 'document:processed';
 
-/**
- * Publish new query event
- */
 export const publishNewQuery = async (queryId, question, documentId) => {
   try {
     const message = {
@@ -30,9 +25,6 @@ export const publishNewQuery = async (queryId, question, documentId) => {
   }
 };
 
-/**
- * Publish query updated event
- */
 export const publishQueryUpdated = async (queryId, status, answerId = null) => {
   try {
     const message = {
@@ -49,9 +41,6 @@ export const publishQueryUpdated = async (queryId, status, answerId = null) => {
   }
 };
 
-/**
- * Publish answer updated event (when feedback improves answer)
- */
 export const publishAnswerUpdated = async (answerId, qualityScore, queryId) => {
   try {
     const message = {
@@ -68,9 +57,6 @@ export const publishAnswerUpdated = async (answerId, qualityScore, queryId) => {
   }
 };
 
-/**
- * Publish document processed event
- */
 export const publishDocumentProcessed = async (documentId, fileName, chunkCount) => {
   try {
     const message = {
@@ -87,9 +73,6 @@ export const publishDocumentProcessed = async (documentId, fileName, chunkCount)
   }
 };
 
-/**
- * Subscribe to new queries
- */
 export const subscribeToNewQueries = (callback) => {
   subscriber.subscribe(CHANNEL_QUERY_NEW);
   subscriber.on('message', (channel, message) => {
@@ -104,9 +87,6 @@ export const subscribeToNewQueries = (callback) => {
   });
 };
 
-/**
- * Subscribe to query updates
- */
 export const subscribeToQueryUpdates = (callback) => {
   subscriber.subscribe(CHANNEL_QUERY_UPDATED);
   subscriber.on('message', (channel, message) => {
@@ -121,9 +101,6 @@ export const subscribeToQueryUpdates = (callback) => {
   });
 };
 
-/**
- * Subscribe to answer updates
- */
 export const subscribeToAnswerUpdates = (callback) => {
   subscriber.subscribe(CHANNEL_ANSWER_UPDATED);
   subscriber.on('message', (channel, message) => {
@@ -138,9 +115,6 @@ export const subscribeToAnswerUpdates = (callback) => {
   });
 };
 
-/**
- * Subscribe to document processed events
- */
 export const subscribeToDocumentProcessed = (callback) => {
   subscriber.subscribe(CHANNEL_DOCUMENT_PROCESSED);
   subscriber.on('message', (channel, message) => {
@@ -155,9 +129,6 @@ export const subscribeToDocumentProcessed = (callback) => {
   });
 };
 
-/**
- * Subscribe to all channels
- */
 export const subscribeToAll = (callbacks) => {
   const channels = [
     CHANNEL_QUERY_NEW,
@@ -192,7 +163,6 @@ export const subscribeToAll = (callbacks) => {
   });
 };
 
-// Graceful shutdown
 process.on('beforeExit', async () => {
   await subscriber.quit();
   await publisher.quit();

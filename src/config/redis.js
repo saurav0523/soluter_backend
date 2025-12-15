@@ -14,7 +14,6 @@ const redisConfig = {
   lazyConnect: false,
 };
 
-// Add TLS for production (Upstash, etc.)
 if (process.env.REDIS_TLS === 'true') {
   redisConfig.tls = {
     rejectUnauthorized: false
@@ -23,7 +22,6 @@ if (process.env.REDIS_TLS === 'true') {
 
 const redis = new Redis(redisConfig);
 
-// Redis connection event handlers
 redis.on('connect', () => {
   console.log('Redis client connected');
 });
@@ -40,12 +38,10 @@ redis.on('close', () => {
   console.log('Redis client connection closed');
 });
 
-// Graceful shutdown
 process.on('beforeExit', async () => {
   await redis.quit();
 });
 
-// Helper function to normalize question for cache key
 export const normalizeQuestion = (question) => {
   return question
     .toLowerCase()
@@ -54,7 +50,6 @@ export const normalizeQuestion = (question) => {
     .replace(/[^\w\s]/g, '');
 };
 
-// Helper function to generate cache key hash
 import crypto from 'crypto';
 
 export const hashQuestion = (question) => {

@@ -14,7 +14,6 @@ const askQuestion = async (req, res, next) => {
       return res.status(400).json({ error: 'Question is required' });
     }
 
-    // Check for cached learned answer first (fast path - exact match)
     const cachedAnswer = await redisCache.getCachedLearnedAnswer(question);
     if (cachedAnswer && cachedAnswer.qualityScore >= 0.7) {
       return res.json({
@@ -28,10 +27,8 @@ const askQuestion = async (req, res, next) => {
       });
     }
 
-    // Generate question embedding once (cached automatically)
     const questionEmbedding = await embedService.generateEmbeddings([question]);
     
-    // Parallel: Check for similar cached response AND find similar queries in DB
     const [similarCached, similarQueries] = await Promise.all([
       redisCache.findSimilarCachedResponse(
         questionEmbedding[0],
@@ -41,7 +38,6 @@ const askQuestion = async (req, res, next) => {
       learningService.findSimilarQueries(question, documentId, 1, questionEmbedding[0])
     ]);
     
-    // If we found a very similar cached response, use it
     if (similarCached && similarCached.similarity >= 0.85) {
       return res.json({
         question,
@@ -56,7 +52,6 @@ const askQuestion = async (req, res, next) => {
       });
     }
     
-    // If we found a very similar query in DB with high quality answer, use it
     if (similarQueries.length > 0 && similarQueries[0].qualityScore >= 0.8) {
       return res.json({
         question,
@@ -70,7 +65,6 @@ const askQuestion = async (req, res, next) => {
       });
     }
 
-    // Parallel operations: Retrieve context and get more similar examples
     const [chunks, similarExamples] = await Promise.all([
       ragService.retrieveContext(question, documentId, { questionEmbedding: questionEmbedding[0] }),
       Promise.resolve(similarQueries.slice(0, 2)) // Use already fetched similar queries
@@ -89,14 +83,12 @@ const askQuestion = async (req, res, next) => {
       similarities,
     );
 
-    // Compute confidence score for the answer
     const confidenceData = confidenceUtil.computeConfidence({
       similarities,
       answer,
       contextText
     });
 
-    // Check if answer should be rejected due to very low confidence
     if (confidenceUtil.shouldRejectAnswer(confidenceData.confidence, answer)) {
       return res.json({
         question,
@@ -117,7 +109,6 @@ const askQuestion = async (req, res, next) => {
       });
     }
 
-    // Use the same embedding we generated earlier (avoid regenerating)
     const queryId = await learningService.storeQuery(question, answer, documentId, chunks, questionEmbedding[0]);
     const answerRecord = await prisma.queryAnswer.findFirst({
       where: { queryId },
@@ -141,7 +132,6 @@ const askQuestion = async (req, res, next) => {
       modelUsed: modelUsed || null,
     };
 
-    // Cache the complete response for similar future queries
     await redisCache.cacheResponse(
       question,
       questionEmbedding[0],
