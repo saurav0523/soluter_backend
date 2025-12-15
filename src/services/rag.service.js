@@ -2,6 +2,11 @@ import prisma from '../config/db.js';
 import embedService from './embed.service.js';
 import rerankService from './rerank.service.js';
 import redisCache from './redis-cache.service.js';
+import {
+  MAX_CONTEXT_CHUNKS,
+  MIN_CONTEXT_CHUNKS,
+  SIMILARITY_THRESHOLD,
+} from '../utils/constants.js';
 
 const formatEmbeddingForPG = (emb) => {
   return `[${emb.map(n => {
@@ -87,7 +92,7 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
       return cached;
     }
 
-    const topK = options.topK ?? 5;
+    const topK = options.topK ?? MAX_CONTEXT_CHUNKS;
     const expandNeighborsCount = options.expandNeighborsCount ?? 5;
     const vectorDim = options.vectorDim ?? 768;
     const useReranking = options.useReranking ?? true;
@@ -190,12 +195,15 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
     merged.sort((a, b) => (b.score || 0) - (a.score || 0));
 
     const topScore = merged[0]?.score ?? 0;
-    const adaptiveThreshold = Math.max(0.45, topScore * 0.6);
+    // Push quality up: use global similarity threshold + adaptive factor
+    const adaptiveThreshold = Math.max(SIMILARITY_THRESHOLD, topScore * 0.6);
 
-    let finalChunks = merged.filter(c => (c.score ?? 0) >= adaptiveThreshold).slice(0, 10);
+    let finalChunks = merged
+      .filter(c => (c.score ?? 0) >= adaptiveThreshold)
+      .slice(0, MAX_CONTEXT_CHUNKS);
 
-    if (finalChunks.length < 3) {
-      finalChunks = merged.slice(0, Math.min(3, merged.length));
+    if (finalChunks.length < MIN_CONTEXT_CHUNKS) {
+      finalChunks = merged.slice(0, Math.min(MIN_CONTEXT_CHUNKS, merged.length));
     }
 
     // Apply re-ranking for better context selection

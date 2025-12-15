@@ -37,27 +37,22 @@ const uploadDocument = async (req, res, next) => {
     }
 
     const chunks = await chunkService.chunkText(extractedText);
-
-    // Upload file to cloud storage (if configured) or keep local
-    // We'll get document ID first, then upload
     const tempDocument = await prisma.document.create({
       data: {
         fileName,
         fileType,
-        filePath, // Temporary local path
+        filePath,
         text: extractedText,
         chunkCount: chunks.length,
       },
     });
 
-    // Upload to cloud storage and get final file path
     const storageResult = await storageService.uploadFile(
       filePath,
       fileName,
       tempDocument.id
     );
 
-    // Update document with final file path (cloud or local)
     const document = await prisma.document.update({
       where: { id: tempDocument.id },
       data: {
@@ -65,10 +60,8 @@ const uploadDocument = async (req, res, next) => {
       },
     });
 
-    // Parallel processing: Generate embeddings
     const embeddings = await embedService.generateEmbeddings(chunks);
 
-    // Validate embeddings
     if (!embeddings || embeddings.length === 0) {
       throw new Error('Failed to generate embeddings for document');
     }
@@ -77,18 +70,16 @@ const uploadDocument = async (req, res, next) => {
       console.warn(`Warning: Generated ${embeddings.length} embeddings for ${chunks.length} chunks. Some chunks may be missing embeddings.`);
     }
 
-    // Batch insert chunks using optimized transaction
-    // Calculate timeout based on number of chunks (minimum 30 seconds, +1 second per 10 chunks)
-    const transactionTimeout = Math.max(30000, 30000 + Math.ceil(chunks.length / 10) * 1000);
-    const BATCH_SIZE = 100; // Increased batch size for better performance
+    const transactionTimeout = Math.max(60000, 60000 + Math.ceil(chunks.length / 10) * 3000);
+    const BATCH_SIZE = 100;
     
-    // Use transaction with increased timeout for large documents
+    console.log(`Inserting ${chunks.length} chunks with ${transactionTimeout}ms timeout`);
+    
     await prisma.$transaction(async (tx) => {
       for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
         
-        // Filter out chunks without valid embeddings and prepare for batch insert
         const validChunks = batch
           .map((chunk, idx) => ({
             chunk,
@@ -101,8 +92,7 @@ const uploadDocument = async (req, res, next) => {
           continue;
         }
         
-        // Use parallel inserts but with smaller concurrency to avoid overwhelming the database
-        const CONCURRENT_INSERTS = 10; // Process 10 inserts at a time
+        const CONCURRENT_INSERTS = 5;
         for (let j = 0; j < validChunks.length; j += CONCURRENT_INSERTS) {
           const concurrentBatch = validChunks.slice(j, j + CONCURRENT_INSERTS);
           
@@ -117,7 +107,7 @@ const uploadDocument = async (req, res, next) => {
               item.index
             );
           });
-          
+        
           await Promise.all(insertPromises);
         }
       }
@@ -126,15 +116,12 @@ const uploadDocument = async (req, res, next) => {
       maxWait: transactionTimeout
     });
 
-    // Build relationships in background (non-blocking)
     graphService.buildRelationships(document.id, chunks).catch(error => {
       console.error('Graph relationship building failed:', error);
     });
-
-    // Publish document processed event
+    
     await redisPubSub.publishDocumentProcessed(document.id, document.fileName, document.chunkCount);
 
-    // Push to queue for async processing (analytics, notifications, etc.)
     await redisQueue.pushDocumentJob(document.id, document.fileName);
 
     res.json({

@@ -4,6 +4,7 @@ import learningService from '../services/learning.service.js';
 import embedService from '../services/embed.service.js';
 import redisCache from '../services/redis-cache.service.js';
 import prisma from '../config/db.js';
+import confidenceUtil from '../utils/confidence.js';
 
 const askQuestion = async (req, res, next) => {
   try {
@@ -79,7 +80,43 @@ const askQuestion = async (req, res, next) => {
       .map((c, i) => `[Document: ${c.documentName || 'Unknown'} | Relevance: ${((c.score || 0) * 100).toFixed(1)}%]\n${c.content || ''}`)
       .join('\n\n---\n\n');
 
-    const answer = await llmService.generateAnswer(question, contextText, similarExamples);
+    const similarities = chunks.map(c => Number(c.score ?? 0));
+
+    const { answer, modelUsed } = await llmService.generateAnswer(
+      question,
+      contextText,
+      similarExamples,
+      similarities,
+    );
+
+    // Compute confidence score for the answer
+    const confidenceData = confidenceUtil.computeConfidence({
+      similarities,
+      answer,
+      contextText
+    });
+
+    // Check if answer should be rejected due to very low confidence
+    if (confidenceUtil.shouldRejectAnswer(confidenceData.confidence, answer)) {
+      return res.json({
+        question,
+        answer: 'I cannot find this information in the uploaded document.',
+        queryId: null,
+        answerId: null,
+        context: chunks.map(c => ({
+          chunk: c.content,
+          score: c.score,
+          documentName: c.documentName,
+        })),
+        confidence: confidenceData.confidence,
+        confidenceLevel: confidenceData.level,
+        confidenceDetail: confidenceData.detail,
+        modelUsed: modelUsed || null,
+        rejected: true,
+        learningEnabled: true,
+      });
+    }
+
     // Use the same embedding we generated earlier (avoid regenerating)
     const queryId = await learningService.storeQuery(question, answer, documentId, chunks, questionEmbedding[0]);
     const answerRecord = await prisma.queryAnswer.findFirst({
@@ -97,7 +134,11 @@ const askQuestion = async (req, res, next) => {
         score: c.score,
         documentName: c.documentName,
       })),
+      confidence: confidenceData.confidence,
+      confidenceLevel: confidenceData.level,
+      confidenceDetail: confidenceData.detail,
       learningEnabled: true,
+      modelUsed: modelUsed || null,
     };
 
     // Cache the complete response for similar future queries

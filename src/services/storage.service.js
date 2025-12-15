@@ -1,53 +1,70 @@
-// Cloud Storage Service - Google Cloud Storage (GCS) for PDF/file storage
-import { Storage } from '@google-cloud/storage';
+// Cloudflare R2 Storage Service (S3-compatible)
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs/promises';
 import path from 'path';
 
-// Initialize GCS client (if credentials provided)
-let storage = null;
+// Initialize R2 client (S3-compatible)
+let r2Client = null;
 let bucketName = null;
 let useCloudStorage = false;
 
-if (process.env.GCS_BUCKET_NAME && process.env.GCS_CREDENTIALS_PATH) {
+if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
   try {
-    storage = new Storage({
-      keyFilename: process.env.GCS_CREDENTIALS_PATH,
-      projectId: process.env.GCS_PROJECT_ID,
+    // Use R2_ENDPOINT if provided, otherwise build from R2_ACCOUNT_ID
+    const endpoint = process.env.R2_ENDPOINT || 
+                     `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+    
+    if (!endpoint || endpoint.includes('undefined')) {
+      throw new Error('R2_ENDPOINT or R2_ACCOUNT_ID required');
+    }
+
+    r2Client = new S3Client({
+      region: 'auto',
+      endpoint: endpoint,
+      credentials: {
+        accessKeyId: process.env.R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      },
     });
-    bucketName = process.env.GCS_BUCKET_NAME;
+    bucketName = process.env.R2_BUCKET_NAME;
     useCloudStorage = true;
-    console.log('Google Cloud Storage initialized');
+    console.log('Cloudflare R2 Storage initialized');
   } catch (error) {
-    console.warn('GCS initialization failed, using local storage:', error.message);
+    console.warn('R2 initialization failed, using local storage:', error.message);
   }
 }
 
 /**
- * Upload file to cloud storage (GCS) or keep local
+ * Upload file to R2 or keep local
  */
 export const uploadFile = async (filePath, fileName, documentId) => {
   try {
-    if (useCloudStorage && storage) {
-      // Upload to GCS
+    if (useCloudStorage && r2Client) {
+      // Upload to R2
       const fileExtension = path.extname(fileName);
       const cloudFileName = `documents/${documentId}${fileExtension}`;
       
-      await storage.bucket(bucketName).upload(filePath, {
-        destination: cloudFileName,
-        metadata: {
-          contentType: getContentType(fileExtension),
-          metadata: {
-            originalName: fileName,
-            documentId: documentId,
-          },
-        },
-      });
-
-      // Get public URL
-      const publicUrl = `gs://${bucketName}/${cloudFileName}`;
-      const httpsUrl = `https://storage.googleapis.com/${bucketName}/${cloudFileName}`;
+      // Read file
+      const fileContent = await fs.readFile(filePath);
       
-      // Delete local file after upload
+      // Upload to R2
+      await r2Client.send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: cloudFileName,
+        Body: fileContent,
+        ContentType: getContentType(fileExtension),
+        Metadata: {
+          originalName: fileName,
+          documentId: documentId,
+        },
+      }));
+
+      // Get R2 URL (use R2_ENDPOINT if provided, otherwise build from R2_ACCOUNT_ID)
+      const baseUrl = process.env.R2_ENDPOINT || 
+                      `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
+      const r2Url = `${baseUrl}/${bucketName}/${cloudFileName}`;
+      
+      // Delete local file after successful upload
       try {
         await fs.unlink(filePath);
       } catch (error) {
@@ -55,8 +72,8 @@ export const uploadFile = async (filePath, fileName, documentId) => {
       }
 
       return {
-        filePath: httpsUrl,
-        storageType: 'gcs',
+        filePath: r2Url,
+        storageType: 'r2',
         bucket: bucketName,
         cloudPath: cloudFileName,
       };
@@ -68,7 +85,7 @@ export const uploadFile = async (filePath, fileName, documentId) => {
       };
     }
   } catch (error) {
-    console.error('File upload to cloud storage failed:', error);
+    console.error('File upload to R2 failed:', error);
     // Fallback to local storage
     return {
       filePath: filePath,
@@ -78,22 +95,27 @@ export const uploadFile = async (filePath, fileName, documentId) => {
 };
 
 /**
- * Download file from cloud storage or read local
+ * Download file from R2 or read local
  */
 export const getFile = async (filePath, storageType = 'local') => {
   try {
-    if (storageType === 'gcs' && storage) {
-      // Extract bucket and file path from GCS URL
-      const urlMatch = filePath.match(/gs:\/\/([^/]+)\/(.+)/) || 
-                       filePath.match(/https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)/);
+    if (storageType === 'r2' && r2Client) {
+      // Extract key from R2 URL
+      const urlMatch = filePath.match(/\/([^/]+\/[^/]+)$/);
       
       if (urlMatch) {
-        const bucket = urlMatch[1];
-        const filePath = urlMatch[2];
+        const key = urlMatch[1];
         
-        // Download to temp file
-        const tempPath = `/tmp/${path.basename(filePath)}`;
-        await storage.bucket(bucket).file(filePath).download({ destination: tempPath });
+        // Download from R2
+        const response = await r2Client.send(new GetObjectCommand({
+          Bucket: bucketName,
+          Key: key,
+        }));
+        
+        // Save to temp file
+        const tempPath = `/tmp/${path.basename(key)}`;
+        const fileContent = await response.Body.transformToByteArray();
+        await fs.writeFile(tempPath, fileContent);
         
         return tempPath;
       }
@@ -102,24 +124,25 @@ export const getFile = async (filePath, storageType = 'local') => {
     // Local file or fallback
     return filePath;
   } catch (error) {
-    console.error('File download from cloud storage failed:', error);
+    console.error('File download from R2 failed:', error);
     throw error;
   }
 };
 
 /**
- * Delete file from cloud storage
+ * Delete file from R2 or local
  */
 export const deleteFile = async (filePath, storageType = 'local') => {
   try {
-    if (storageType === 'gcs' && storage) {
-      const urlMatch = filePath.match(/gs:\/\/([^/]+)\/(.+)/) || 
-                       filePath.match(/https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)/);
+    if (storageType === 'r2' && r2Client) {
+      const urlMatch = filePath.match(/\/([^/]+\/[^/]+)$/);
       
       if (urlMatch) {
-        const bucket = urlMatch[1];
-        const filePath = urlMatch[2];
-        await storage.bucket(bucket).file(filePath).delete();
+        const key = urlMatch[1];
+        await r2Client.send(new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: key,
+        }));
         return true;
       }
     } else {
@@ -159,7 +182,7 @@ const getContentType = (extension) => {
  * Check if cloud storage is available
  */
 export const isCloudStorageEnabled = () => {
-  return useCloudStorage && storage !== null;
+  return useCloudStorage && r2Client !== null;
 };
 
 export default {
@@ -168,4 +191,3 @@ export default {
   deleteFile,
   isCloudStorageEnabled,
 };
-

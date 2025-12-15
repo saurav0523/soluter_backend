@@ -1,17 +1,150 @@
-import ollama from 'ollama';
+const HF_CHAT_URL = process.env.HF_CHAT_URL || 'https://router.huggingface.co/v1/chat/completions';
+const HF_API_KEY = process.env.HF_API_KEY;
+const HF_FAST_MODEL = process.env.HF_FAST_MODEL;       // e.g. Qwen/Qwen2.5-7B-Instruct
+const HF_ACCURATE_MODEL = process.env.HF_ACCURATE_MODEL; // e.g. Qwen/Qwen2.5-14B-Instruct
 
-const generateAnswer = async (question, context, similarExamples = []) => {
+const ensureEnv = () => {
+  if (!HF_API_KEY) {
+    throw new Error('HF_API_KEY is not set in environment (.env).');
+  }
+  if (!HF_FAST_MODEL || !HF_ACCURATE_MODEL) {
+    throw new Error('HF_FAST_MODEL and HF_ACCURATE_MODEL must be set in .env.');
+  }
+};
+
+const callHFChat = async (model, prompt) => {
+  const res = await fetch(HF_CHAT_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${HF_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: prompt,
+        },
+      ],
+      temperature: 0,
+    }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`HF Router error (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const choice = data.choices?.[0]?.message?.content;
+  if (!choice) {
+    throw new Error('HF Router returned empty response');
+  }
+  return choice.trim();
+};
+
+const buildPrompt = (contextText, question) => `
+You are an expert problem-solving assistant. Apply methodologies, formulas, and rules from reference documents to solve problems across any domain (mathematics, science, law, finance, medicine, etc.).
+
+UNIVERSAL PROBLEM-SOLVING FRAMEWORK:
+
+1. UNDERSTAND THE DOMAIN & PROBLEM TYPE:
+   - Mathematics: Identify formula, theorem, or method (e.g., trigonometry, algebra, geometry)
+   - Science/Medical: Identify law, principle, or diagnostic criteria
+   - Finance/Tax: Identify applicable sections, calculation methods, exemptions
+   - Law/Legal: Identify relevant provisions, clauses, precedents
+   - General: Identify the core concept or rule being tested
+
+2. METHODOLOGY EXTRACTION (from CONTEXT):
+   - Formulas & Equations (e.g., sin²θ + cos²θ = 1, E=mc²)
+   - Rules & Laws (e.g., Newton's laws, tax sections)
+   - Procedures & Methods (e.g., diagnostic steps, calculation procedures)
+   - Definitions & Criteria (e.g., disease symptoms, legal definitions)
+   - Conditions & Constraints (e.g., "only if", "provided that", limits)
+
+3. DATA EXTRACTION (from QUESTION):
+   - Identify GIVEN: What data is provided (numbers, names, values, conditions)
+   - Identify REQUIRED: What needs to be calculated/found/proven
+   - CRITICAL: Use ONLY the data from QUESTION, NOT from CONTEXT examples
+   - Example: If CONTEXT has "sin 30° = 0.5" but QUESTION asks "sin 45°", find sin 45° formula
+
+4. DISTINGUISH WHAT'S WHAT:
+   - CONTEXT = Reference material (formulas, rules, examples with methodology)
+   - QUESTION = New problem (different values, names, angles, amounts)
+   - Apply CONTEXT's methodology to QUESTION's data
+   - NEVER substitute CONTEXT's example values into your answer
+
+5. STEP-BY-STEP SOLUTION:
+   Step 1: State the applicable rule/formula/method from CONTEXT
+   Step 2: List all given data from QUESTION
+   Step 3: Apply the rule/formula using QUESTION's specific values
+   Step 4: Show intermediate calculations clearly
+   Step 5: State the final answer with proper units/format
+
+6. DOMAIN-SPECIFIC ACCURACY:
+   - Mathematics: Show all substitutions, use correct notation (°, rad, √)
+   - Finance/Tax: Distinguish income vs deduction, show gross → net calculation
+   - Medical: List symptoms from question, match to diagnostic criteria from context
+   - Legal: Cite specific sections/clauses, apply to question's scenario
+   - Always maintain precision (decimal places, units, currency)
+
+7. WHEN TO SAY "CANNOT FIND":
+   - ONLY if CONTEXT completely lacks the required formula/rule/method
+   - NOT if CONTEXT has similar problems with different values
+   - Example: Can solve "Find sin 60°" if CONTEXT has trigonometric formulas, even if no sin 60° example
+
+8. ANSWER FORMAT:
+   - Start: "Based on [formula/rule/section] from the document..."
+   - Show: Step-by-step with QUESTION's actual values
+   - Label: Clearly mark "Given:", "Formula:", "Calculation:", "Answer:"
+   - End: Final answer in proper format (with units, currency, or conclusion)
+
+Context (Reference Material - Formulas, Rules, Methods, Examples):
+${contextText}
+
+Question (New Problem - Extract your data from here):
+${question}
+
+Now solve this step-by-step using the methodology from context and data from question:
+`;
+
+const shouldEscalateToAccurate = ({ similarities, answer, question }) => {
+  if (!similarities || similarities.length === 0) {
+    return false;
+  }
+
+  const avgScore = similarities.reduce((a, b) => a + b, 0) / similarities.length;
+
+  const qLower = (question || '').toLowerCase();
+  
+  // Keywords that indicate need for higher accuracy
+  const complexKeywords = [
+    'calculate', 'computation', 'taxable', 'capital gain', 'income tax',
+    'assessment year', 'deduction', 'exemption', 'financial year',
+    'law', 'legal', 'compliance', 'penalty', 'fine', 'regulation',
+    'section', 'act', 'clause', 'provision', 'amendment'
+  ];
+
+  const isComplex = complexKeywords.some(k => qLower.includes(k));
+
+  // Escalate if:
+  // 1. Low similarity (< 0.75)
+  // 2. Answer indicates uncertainty
+  // 3. Question involves complex calculations or legal matters
+  if (avgScore < 0.75) return true;
+  if (answer && answer.includes('I cannot find')) return true;
+  if (isComplex) return true;
+
+  return false;
+};
+
+const generateAnswer = async (question, context, similarExamples = [], similarities = []) => {
   try {
-    // Read environment variables at runtime to ensure they're loaded
-    const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL;
-    const OLLAMA_MODEL = process.env.OLLAMA_MODEL;
+    ensureEnv();
 
-    // Validate required environment variables
-    if (!OLLAMA_MODEL) {
-      throw new Error('OLLAMA_MODEL environment variable is not set. Please set it in your .env file (e.g., OLLAMA_MODEL=llama2)');
-    }
     let contextText;
-    
+
     if (typeof context === 'string') {
       contextText = context;
     } else if (Array.isArray(context) && context.length > 0) {
@@ -19,88 +152,38 @@ const generateAnswer = async (question, context, similarExamples = []) => {
         .map((chunk, index) => `--- Context ${index + 1} (Relevance: ${((chunk.score || 0) * 100).toFixed(1)}%) ---\n${chunk.content || ''}`)
         .join('\n\n');
     } else {
-      return 'No relevant context found to answer this question.';
+      return {
+        answer: 'No relevant context found to answer this question.',
+        modelUsed: null,
+      };
     }
 
-    const prompt = `You are an expert problem-solving assistant specializing in case studies and mathematical calculations.
+    const prompt = buildPrompt(contextText, question);
 
-YOUR TASK:
-Solve the question below using the methodology and rules from the CONTEXT, but apply them ONLY to the specific data provided in the QUESTION.
+    // Step 1: fast path (7B)
+    const fastAnswer = await callHFChat(HF_FAST_MODEL, prompt);
 
-CRITICAL RULES:
-1. DATA SOURCE SEPARATION:
-   - Extract ALL specific data (names, amounts, dates, percentages, quantities) ONLY from the QUESTION
-   - Use CONTEXT ONLY for: formulas, rules, calculation methods, legal provisions, tax rates, exemptions
-   - NEVER use example data from CONTEXT (like "Ramesh has ₹30,000" or "Company XYZ") - these are just examples
-   - If CONTEXT shows an example with "Ramesh" but QUESTION asks about "Priya", use ONLY Priya's data from QUESTION
-
-2. FOR CASE-BASED SCENARIOS:
-   - Identify all entities mentioned in the QUESTION (persons, companies, transactions)
-   - Extract all numerical values, dates, and conditions from the QUESTION
-   - Apply the rules/methodology from CONTEXT to these specific entities
-   - Show clear reasoning: "Based on [rule from context], for [entity from question]..."
-
-3. FOR MATHEMATICAL QUESTIONS:
-   - Identify the formula/method from CONTEXT
-   - Extract all numbers and variables from the QUESTION
-   - Show step-by-step calculation:
-     Step 1: Identify formula → [formula from context]
-     Step 2: Extract values → [values from question]
-     Step 3: Substitute → [calculation]
-     Step 4: Result → [final answer]
-   - Double-check arithmetic and ensure units are correct
-
-4. ANSWER STRUCTURE:
-   - Start with: "Based on the provided context, here's the solution:"
-   - List all data extracted from QUESTION
-   - Reference relevant rules/formulas from CONTEXT
-   - Show complete step-by-step work
-   - Provide final answer clearly
-   - If data is missing, state: "The following information is missing: [list]"
-
-5. IF ANSWER NOT IN CONTEXT:
-   Reply exactly: "I cannot find this information in the uploaded document."
-
-${similarExamples.length > 0 ? `\nLEARNING FROM SIMILAR QUESTIONS (Use these as reference for approach, but use ONLY the current question's data):
-${similarExamples.map((ex, idx) => `
-Example ${idx + 1} (Quality: ${(ex.qualityScore * 100).toFixed(0)}%, Used ${ex.usageCount} times):
-Question: ${ex.question}
-Answer Approach: ${ex.answer.substring(0, 300)}${ex.answer.length > 300 ? '...' : ''}
-`).join('\n')}
-` : ''}
-
-CONTEXT (Rules, Formulas, Methods):
-${contextText}
-
-QUESTION (Extract data from here):
-${question}
-
-Now solve this problem step-by-step:`;
-
-    const response = await ollama.generate({
-      model: OLLAMA_MODEL,
-      prompt,
-      stream: false,
-      options: {
-        host: OLLAMA_BASE_URL,
-        temperature: 0.1,
-        top_p: 0.9,
-        num_predict: 1500, // Reduced from 2000 for faster generation
-        top_k: 30,
-        repeat_penalty: 1.1,
-        num_ctx: 4096
-      }
+    const escalate = shouldEscalateToAccurate({
+      similarities,
+      answer: fastAnswer,
+      question,
     });
 
-    return response.response || 'Unable to generate answer.';
+    if (!escalate) {
+      return {
+        answer: fastAnswer,
+        modelUsed: 'fast',
+      };
+    }
+
+    // Step 2: high-accuracy path (14B)
+    const accurateAnswer = await callHFChat(HF_ACCURATE_MODEL, prompt);
+
+    return {
+      answer: accurateAnswer,
+      modelUsed: 'accurate',
+    };
   } catch (error) {
-    // Provide helpful error messages for common issues
-    if (error.message && error.message.includes('not found')) {
-      throw new Error(`LLM model '${process.env.OLLAMA_MODEL}' not found. Please ensure Ollama is running and the model is installed. Run: ollama pull ${process.env.OLLAMA_MODEL}`);
-    }
-    if (error.message && error.message.includes('connection')) {
-      throw new Error(`Cannot connect to Ollama at ${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}. Make sure Ollama is running: ollama serve`);
-    }
     throw new Error(`LLM answer generation failed: ${error.message}`);
   }
 };

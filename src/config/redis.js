@@ -1,6 +1,6 @@
 import Redis from 'ioredis';
 
-const redis = new Redis({
+const redisConfig = {
   host: process.env.REDIS_HOST || 'localhost',
   port: parseInt(process.env.REDIS_PORT) || 6379,
   password: process.env.REDIS_PASSWORD || undefined,
@@ -12,7 +12,16 @@ const redis = new Redis({
   maxRetriesPerRequest: 3,
   enableReadyCheck: true,
   lazyConnect: false,
-});
+};
+
+// Add TLS for production (Upstash, etc.)
+if (process.env.REDIS_TLS === 'true') {
+  redisConfig.tls = {
+    rejectUnauthorized: false
+  };
+}
+
+const redis = new Redis(redisConfig);
 
 // Redis connection event handlers
 redis.on('connect', () => {

@@ -1,76 +1,120 @@
 import ollama from 'ollama';
 import redisCache from './redis-cache.service.js';
 
-// Optimized batch size based on model capacity
 const OPTIMAL_BATCH_SIZE = 10;
 const MAX_CONCURRENT_REQUESTS = 20;
 
+const normalizeEmbedding = (embedding) => {
+  if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
+    return embedding;
+  }
+
+  let normSq = 0;
+  for (const v of embedding) {
+    const n = Number(v) || 0;
+    normSq += n * n;
+  }
+
+  if (normSq === 0) {
+    return embedding.map(() => 0);
+  }
+
+  const norm = Math.sqrt(normSq);
+  return embedding.map(v => (Number(v) || 0) / norm);
+};
+
+// Generate single embedding using HuggingFace or Ollama
+const generateSingleEmbedding = async (text) => {
+  const USE_CLOUD_EMBEDDINGS = process.env.USE_CLOUD_EMBEDDINGS === 'true';
+  const HF_API_KEY = process.env.HF_API_KEY;
+  const HF_EMBEDDING_MODEL = process.env.HF_EMBEDDING_MODEL || 'nomic-ai/nomic-embed-text-v1';
+  const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL;
+  const OLLAMA_EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
+
+  if (USE_CLOUD_EMBEDDINGS && HF_API_KEY) {
+    // HuggingFace Inference API (Production) - Uses SAME token as LLM
+    const response = await fetch(
+      `https://api-inference.huggingface.co/pipeline/feature-extraction/${HF_EMBEDDING_MODEL}`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${HF_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ inputs: text }),
+      }
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`HuggingFace API error (${response.status}): ${errorText}`);
+    }
+
+    const embedding = await response.json();
+    
+    // HF returns embedding directly as array
+    if (Array.isArray(embedding)) {
+      return normalizeEmbedding(embedding);
+    } else if (embedding.embeddings && Array.isArray(embedding.embeddings[0])) {
+      return normalizeEmbedding(embedding.embeddings[0]);
+    }
+    
+    throw new Error('Invalid HuggingFace embedding response format');
+  } else {
+    // Local Ollama (Development)
+    const response = await ollama.embeddings({
+      model: OLLAMA_EMBEDDING_MODEL,
+      prompt: text,
+      options: {
+        host: OLLAMA_BASE_URL
+      }
+    });
+
+    if (!response || !response.embedding) {
+      throw new Error('Invalid Ollama embedding response');
+    }
+
+    return normalizeEmbedding(response.embedding);
+  }
+};
+
 const generateEmbeddings = async (chunks) => {
   try {
-    const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL;
-    const EMBEDDING_MODEL = process.env.OLLAMA_EMBEDDING_MODEL;
-
-
     if (!chunks || chunks.length === 0) {
       return [];
     }
 
-    // Check cache first
+    // Single chunk - fast path with caching
     if (chunks.length === 1) {
       const cached = await redisCache.getCachedEmbedding(chunks[0]);
       if (cached) {
         return [cached];
       }
 
-      const response = await ollama.embeddings({
-        model: EMBEDDING_MODEL,
-        prompt: chunks[0],
-        options: {
-          host: OLLAMA_BASE_URL
-        }
-      });
-
-      if (response && response.embedding) {
-        await redisCache.cacheEmbedding(chunks[0], response.embedding);
-        return [response.embedding];
-      } else {
-        throw new Error('Invalid embedding response');
-      }
+      const embedding = await generateSingleEmbedding(chunks[0]);
+      await redisCache.cacheEmbedding(chunks[0], embedding);
+      return [embedding];
     }
 
-    // Parallel processing with optimal batch size and caching
+    // Multiple chunks - batch processing with caching
     const embeddings = [];
     const batches = [];
     
-    // Create batches
     for (let i = 0; i < chunks.length; i += OPTIMAL_BATCH_SIZE) {
       batches.push(chunks.slice(i, i + OPTIMAL_BATCH_SIZE));
     }
 
-    // Process batches in parallel (with concurrency limit and caching)
     const processBatch = async (batch) => {
       const batchPromises = batch.map(async (chunk) => {
-        // Check cache first
         const cached = await redisCache.getCachedEmbedding(chunk);
         if (cached) {
           return { embedding: cached };
         }
 
-        // Generate if not cached
         try {
-          const response = await ollama.embeddings({
-            model: EMBEDDING_MODEL,
-            prompt: chunk,
-            options: {
-              host: OLLAMA_BASE_URL
-            }
-          });
-
-          if (response && response.embedding) {
-            await redisCache.cacheEmbedding(chunk, response.embedding);
-            return response;
-          }
-          return null;
+          const embedding = await generateSingleEmbedding(chunk);
+          await redisCache.cacheEmbedding(chunk, embedding);
+          return { embedding };
         } catch (error) {
           console.error(`Embedding generation failed for chunk: ${error.message}`);
           return null;
@@ -83,7 +127,6 @@ const generateEmbeddings = async (chunks) => {
         .map(response => response.embedding);
     };
 
-    // Process with concurrency control
     for (let i = 0; i < batches.length; i += MAX_CONCURRENT_REQUESTS) {
       const concurrentBatches = batches.slice(i, i + MAX_CONCURRENT_REQUESTS);
       const results = await Promise.all(concurrentBatches.map(processBatch));
@@ -103,4 +146,3 @@ const generateEmbeddings = async (chunks) => {
 export default {
   generateEmbeddings,
 };
-
