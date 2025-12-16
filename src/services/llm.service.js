@@ -13,6 +13,14 @@ const ensureEnv = () => {
 };
 
 const callHFChat = async (model, prompt) => {
+  if (!HF_API_KEY) {
+    throw new Error('HF_CHAT_API_KEY is not set. Please set it in your .env file.');
+  }
+
+  if (!HF_API_KEY.startsWith('hf_')) {
+    console.warn('Warning: HF_CHAT_API_KEY should start with "hf_". Please verify your HuggingFace token.');
+  }
+
   const res = await fetch(HF_CHAT_URL, {
     method: 'POST',
     headers: {
@@ -33,7 +41,15 @@ const callHFChat = async (model, prompt) => {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`HF Router error (${res.status}): ${text}`);
+    let errorMessage = `HF Router error (${res.status}): ${text}`;
+    
+    if (res.status === 401) {
+      errorMessage = `HuggingFace authentication failed (401). Please check your HF_CHAT_API_KEY in .env file. ` +
+                     `The token might be invalid, expired, or missing required permissions. ` +
+                     `Get a new token from: https://huggingface.co/settings/tokens`;
+    }
+    
+    throw new Error(errorMessage);
   }
 
   const data = await res.json();
