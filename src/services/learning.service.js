@@ -13,7 +13,6 @@ const formatEmbeddingForPG = (emb) => {
 
 const storeQuery = async (question, answer, documentId, contextChunks, questionEmbedding = null) => {
   try {
-    // Use provided embedding if available (to avoid regenerating), otherwise generate
     let qEmb;
     if (questionEmbedding) {
       qEmb = questionEmbedding;
@@ -53,15 +52,13 @@ const storeQuery = async (question, answer, documentId, contextChunks, questionE
         queryId,
         answer,
         contextChunks: chunkIds,
-        qualityScore: 0.5, // Initial score, will improve with feedback
+        qualityScore: 0.5,
         usageCount: 1,
       },
     });
 
-    // Set timeout for query (10 minutes)
     await redisTimeout.setTimeout(queryId, 600);
 
-    // Publish new query event
     await redisPubSub.publishNewQuery(queryId, question, documentId);
 
     return queryId;
@@ -72,18 +69,16 @@ const storeQuery = async (question, answer, documentId, contextChunks, questionE
 
 const findSimilarQueries = async (question, documentId = null, limit = 3, questionEmbedding = null) => {
   try {
-    // First check Redis cache for learned answers
     const cachedAnswer = await redisCache.getCachedLearnedAnswer(question);
     if (cachedAnswer && cachedAnswer.qualityScore >= 0.6) {
       return [{
         question,
         answer: cachedAnswer.answer,
         qualityScore: cachedAnswer.qualityScore,
-        usageCount: 1, // Approximate
+        usageCount: 1,
       }];
     }
 
-    // Use provided embedding if available (for parallel operations), otherwise generate
     let qEmb;
     if (questionEmbedding) {
       qEmb = questionEmbedding;
@@ -129,7 +124,6 @@ const findSimilarQueries = async (question, documentId = null, limit = 3, questi
       usageCount: Number(r.usageCount || 0),
     }));
 
-    // Cache high-quality answers in Redis
     for (const sq of similarQueries) {
       if (sq.qualityScore >= 0.6) {
         await redisCache.cacheLearnedAnswer(sq.question, sq.answer, null, sq.qualityScore, documentId);
@@ -183,7 +177,6 @@ const recordFeedback = async (queryId, answerId, rating, isHelpful, correction =
           },
         });
 
-        // If quality score is high, cache the learned answer
         if (qualityScore >= 0.6 && updatedAnswer.query) {
           await redisCache.cacheLearnedAnswer(
             updatedAnswer.query.question,
@@ -194,12 +187,10 @@ const recordFeedback = async (queryId, answerId, rating, isHelpful, correction =
           );
         }
 
-        // Publish answer updated event
         await redisPubSub.publishAnswerUpdated(answerId, qualityScore, queryId);
       }
     }
-
-    // Clear timeout if query is resolved
+    
     await redisTimeout.clearTimeout(queryId);
   } catch (error) {
     throw new Error(`Failed to record feedback: ${error.message}`);

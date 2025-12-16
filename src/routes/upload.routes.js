@@ -2,7 +2,6 @@ import express from 'express';
 import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { config } from '../config/env.js';
 import uploadController from '../controllers/upload.controller.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -24,7 +23,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: {
-    fileSize: config.maxFileSize,
+    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 10485760,
   },
 });
 

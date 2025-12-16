@@ -1,12 +1,9 @@
-// Redis timeout service using sorted sets for managing query timeouts
+
 import redis from '../config/redis.js';
 
 const TIMEOUT_SET = 'timeouts:queries';
-const DEFAULT_TIMEOUT = 600; // 10 minutes in seconds
+const DEFAULT_TIMEOUT = 600;
 
-/**
- * Set timeout for a query
- */
 export const setTimeout = async (queryId, timeoutSeconds = DEFAULT_TIMEOUT) => {
   try {
     const expiryTimestamp = Date.now() + (timeoutSeconds * 1000);
@@ -18,9 +15,6 @@ export const setTimeout = async (queryId, timeoutSeconds = DEFAULT_TIMEOUT) => {
   }
 };
 
-/**
- * Remove timeout for a query (when resolved)
- */
 export const clearTimeout = async (queryId) => {
   try {
     await redis.zrem(TIMEOUT_SET, queryId);
@@ -31,9 +25,6 @@ export const clearTimeout = async (queryId) => {
   }
 };
 
-/**
- * Get expired queries (queries that have passed their timeout)
- */
 export const getExpiredQueries = async () => {
   try {
     const now = Date.now();
@@ -45,9 +36,6 @@ export const getExpiredQueries = async () => {
   }
 };
 
-/**
- * Get all pending queries with their expiry times
- */
 export const getPendingQueries = async () => {
   try {
     const now = Date.now();
@@ -67,13 +55,10 @@ export const getPendingQueries = async () => {
   }
 };
 
-/**
- * Check if a query has expired
- */
 export const isExpired = async (queryId) => {
   try {
     const score = await redis.zscore(TIMEOUT_SET, queryId);
-    if (!score) return false; // Not in timeout set
+    if (!score) return false;
     return Date.now() > parseInt(score);
   } catch (error) {
     console.error('Redis check expired error:', error);
@@ -81,9 +66,6 @@ export const isExpired = async (queryId) => {
   }
 };
 
-/**
- * Get time remaining for a query
- */
 export const getTimeRemaining = async (queryId) => {
   try {
     const score = await redis.zscore(TIMEOUT_SET, queryId);

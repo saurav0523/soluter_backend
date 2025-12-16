@@ -1,7 +1,4 @@
--- Migration: Add Learning System Tables
--- Run this migration to add Query, QueryAnswer, and Feedback tables
 
--- Create Query table
 CREATE TABLE IF NOT EXISTS "Query" (
     "id" TEXT NOT NULL,
     "question" TEXT NOT NULL,
@@ -13,7 +10,6 @@ CREATE TABLE IF NOT EXISTS "Query" (
     CONSTRAINT "Query_pkey" PRIMARY KEY ("id")
 );
 
--- Create QueryAnswer table
 CREATE TABLE IF NOT EXISTS "QueryAnswer" (
     "id" TEXT NOT NULL,
     "queryId" TEXT NOT NULL,
@@ -27,7 +23,6 @@ CREATE TABLE IF NOT EXISTS "QueryAnswer" (
     CONSTRAINT "QueryAnswer_pkey" PRIMARY KEY ("id")
 );
 
--- Create Feedback table
 CREATE TABLE IF NOT EXISTS "Feedback" (
     "id" TEXT NOT NULL,
     "queryId" TEXT NOT NULL,
@@ -41,7 +36,6 @@ CREATE TABLE IF NOT EXISTS "Feedback" (
     CONSTRAINT "Feedback_pkey" PRIMARY KEY ("id")
 );
 
--- Create indexes
 CREATE INDEX IF NOT EXISTS "Query_documentId_idx" ON "Query"("documentId");
 CREATE INDEX IF NOT EXISTS "QueryAnswer_queryId_idx" ON "QueryAnswer"("queryId");
 CREATE INDEX IF NOT EXISTS "QueryAnswer_qualityScore_idx" ON "QueryAnswer"("qualityScore");
@@ -49,7 +43,6 @@ CREATE INDEX IF NOT EXISTS "Feedback_queryId_idx" ON "Feedback"("queryId");
 CREATE INDEX IF NOT EXISTS "Feedback_answerId_idx" ON "Feedback"("answerId");
 CREATE INDEX IF NOT EXISTS "Feedback_isHelpful_idx" ON "Feedback"("isHelpful");
 
--- Add foreign key constraints
 ALTER TABLE "Query" ADD CONSTRAINT "Query_documentId_fkey" 
     FOREIGN KEY ("documentId") REFERENCES "Document"("id") 
     ON DELETE SET NULL ON UPDATE CASCADE;
@@ -66,7 +59,6 @@ ALTER TABLE "Feedback" ADD CONSTRAINT "Feedback_answerId_fkey"
     FOREIGN KEY ("answerId") REFERENCES "QueryAnswer"("id") 
     ON DELETE SET NULL ON UPDATE CASCADE;
 
--- Create index on questionEmbedding for similarity search (using pgvector)
 CREATE INDEX IF NOT EXISTS "Query_questionEmbedding_idx" 
     ON "Query" USING ivfflat ("questionEmbedding" vector_cosine_ops)
     WITH (lists = 100);

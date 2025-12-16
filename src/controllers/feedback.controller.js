@@ -17,7 +17,6 @@ const submitFeedback = async (req, res, next) => {
       return res.status(400).json({ error: 'isHelpful must be a boolean' });
     }
 
-    // Record feedback (synchronous - important for data integrity)
     await learningService.recordFeedback(
       queryId,
       answerId || null,
@@ -30,8 +29,7 @@ const submitFeedback = async (req, res, next) => {
     if (answerId) {
       await learningService.improveAnswerQuality(answerId);
     }
-
-    // Push feedback processing job to queue (async analytics, webhooks, etc.)
+      
     await redisQueue.pushFeedbackJob(queryId, answerId, {
       rating,
       isHelpful,

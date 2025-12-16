@@ -16,7 +16,6 @@ const cosineSimilarity = (vecA, vecB) => {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 };
 
-// Optimized: Batch insert relationships instead of sequential
 const buildRelationships = async (documentId, chunks) => {
   try {
     const documentChunks = await prisma.$queryRaw`
@@ -43,9 +42,8 @@ const buildRelationships = async (documentId, chunks) => {
     });
 
     const relationshipsToCreate = [];
-    const BATCH_SIZE = 100; // Batch insert size
+    const BATCH_SIZE = 100;
 
-    // Build sequential relationships (O(n) instead of O(n²))
     for (let i = 0; i < chunksWithEmbeddings.length - 1; i++) {
       relationshipsToCreate.push({
         sourceChunkId: chunksWithEmbeddings[i].id,
@@ -55,16 +53,13 @@ const buildRelationships = async (documentId, chunks) => {
       });
     }
 
-    // Optimized semantic relationship building
-    // Only compare nearby chunks (within window) to reduce O(n²) to O(n*window)
-    const SEMANTIC_WINDOW = 50; // Only check chunks within 50 positions
+    const SEMANTIC_WINDOW = 50;
     const SIMILARITY_THRESHOLD = 0.7;
 
     for (let i = 0; i < chunksWithEmbeddings.length; i++) {
       const currentChunk = chunksWithEmbeddings[i];
       const currentEmbedding = currentChunk.embedding;
       
-      // Only check chunks within window (reduces computation significantly)
       const endIndex = Math.min(i + SEMANTIC_WINDOW, chunksWithEmbeddings.length);
       
       for (let j = i + 1; j < endIndex; j++) {
@@ -82,16 +77,14 @@ const buildRelationships = async (documentId, chunks) => {
       }
     }
 
-    // Batch insert relationships
     for (let i = 0; i < relationshipsToCreate.length; i += BATCH_SIZE) {
       const batch = relationshipsToCreate.slice(i, i + BATCH_SIZE);
       await prisma.relationship.createMany({
         data: batch,
-        skipDuplicates: true, // Skip if relationship already exists
+        skipDuplicates: true,
       });
     }
 
-    console.log(`Created ${relationshipsToCreate.length} relationships for document ${documentId}`);
   } catch (error) {
     throw new Error(`Graph relationship building failed: ${error.message}`);
   }
