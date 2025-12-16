@@ -94,6 +94,7 @@ const generateEmbeddings = async (chunks) => {
 
     const embeddings = [];
     const batches = [];
+    const errors = [];
     
     for (let i = 0; i < chunks.length; i += OPTIMAL_BATCH_SIZE) {
       batches.push(chunks.slice(i, i + OPTIMAL_BATCH_SIZE));

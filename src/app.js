@@ -5,7 +5,14 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+
+// Try loading .env from multiple locations
+const rootEnvPath = path.resolve(__dirname, '../../.env');
+const backendEnvPath = path.resolve(__dirname, '../.env');
+
+// Load root .env first, then backend/.env (backend/.env will override root)
+dotenv.config({ path: rootEnvPath });
+dotenv.config({ path: backendEnvPath });
 
 import express from 'express';
 import cors from 'cors';

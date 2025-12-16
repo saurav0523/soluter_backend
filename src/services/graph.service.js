@@ -85,7 +85,6 @@ const buildRelationships = async (documentId, chunks) => {
       });
     }
 
-    console.log(`Created ${relationshipsToCreate.length} relationships for document ${documentId}`);
   } catch (error) {
     throw new Error(`Graph relationship building failed: ${error.message}`);
   }

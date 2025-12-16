@@ -1,13 +1,34 @@
-
+import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
 import fs from 'fs/promises';
-import path from 'path';
+
+// Load environment variables before using them (in case this module loads before app.js)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Try both locations: root .env and backend/.env (backend/.env will override)
+const rootEnvPath = path.resolve(__dirname, '../../.env');
+const backendEnvPath = path.resolve(__dirname, '../.env');
+dotenv.config({ path: rootEnvPath });
+dotenv.config({ path: backendEnvPath }); // This will override root if both exist
   
 let r2Client = null;
 let bucketName = null;
 let useCloudStorage = false;
 
-if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
+// Initialize R2 Storage
+const initializeR2Storage = () => {
+  const hasAccessKey = !!process.env.R2_ACCESS_KEY_ID;
+  const hasSecretKey = !!process.env.R2_SECRET_ACCESS_KEY;
+  const hasBucket = !!process.env.R2_BUCKET_NAME;
+  const hasEndpoint = !!process.env.R2_ENDPOINT;
+  const hasAccountId = !!process.env.R2_ACCOUNT_ID;
+  
+  if (!hasAccessKey || !hasSecretKey || !hasBucket || (!hasEndpoint && !hasAccountId)) {
+    return;
+  }
+
   try {
     const endpoint = process.env.R2_ENDPOINT || 
                      `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`;
@@ -26,11 +47,13 @@ if (process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY) {
     });
     bucketName = process.env.R2_BUCKET_NAME;
     useCloudStorage = true;
-    console.log('Cloudflare R2 Storage initialized');
   } catch (error) {
-    console.warn('R2 initialization failed, using local storage:', error.message);
+    console.error('R2 initialization failed, using local storage:', error.message);
   }
-}
+};
+
+// Initialize on module load
+initializeR2Storage();
 
 export const uploadFile = async (filePath, fileName, documentId) => {
   try {
@@ -58,7 +81,7 @@ export const uploadFile = async (filePath, fileName, documentId) => {
       try {
         await fs.unlink(filePath);
       } catch (error) {
-        console.warn('Failed to delete local file:', error.message);
+        // Ignore cleanup errors
       }
 
       return {
@@ -74,7 +97,7 @@ export const uploadFile = async (filePath, fileName, documentId) => {
       };
     }
   } catch (error) {
-    console.error('File upload to R2 failed:', error);
+    console.error('File upload to R2 failed:', error.message);
     return {
       filePath: filePath,
       storageType: 'local',
@@ -128,7 +151,6 @@ export const deleteFile = async (filePath, storageType = 'local') => {
         await fs.unlink(filePath);
         return true;
       } catch (error) {
-        console.warn('Failed to delete local file:', error.message);
         return false;
       }
     }

@@ -10,11 +10,7 @@ const getWorker = async () => {
   }
   
   const worker = await createWorker('eng', 1, {
-    logger: (m) => {
-      if (m.status === 'recognizing text' && m.progress === 1) {
-        console.log('OCR completed');
-      }
-    },
+    logger: () => {},
   });
   
   await worker.setParameters({
