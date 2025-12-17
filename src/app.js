@@ -16,6 +16,8 @@ dotenv.config({ path: backendEnvPath });
 
 import express from 'express';
 import cors from 'cors';
+import swaggerUi from 'swagger-ui-express';
+import swaggerSpec from './config/swagger.js';
 import uploadRoutes from './routes/upload.routes.js';
 import askRoutes from './routes/ask.routes.js';
 import docRoutes from './routes/doc.routes.js';
@@ -26,6 +28,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Swagger documentation
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Soluter Backend API Documentation',
+}));
 
 app.use('/api/upload', uploadRoutes);
 app.use('/api/ask', askRoutes);
