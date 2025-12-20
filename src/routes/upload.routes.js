@@ -55,6 +55,13 @@ const upload = multer({
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/DocumentUploadResponse'
+ *             example:
+ *               success: true
+ *               document:
+ *                 id: "550e8400-e29b-41d4-a716-446655440000"
+ *                 fileName: "example.pdf"
+ *                 fileType: "pdf"
+ *                 chunkCount: 45
  *       400:
  *         description: Bad request - No file uploaded, unsupported file type, or processing error
  *         content:

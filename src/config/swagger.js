@@ -74,10 +74,23 @@ const options = {
           properties: {
             success: {
               type: 'boolean',
+              example: true,
+              description: 'Indicates if the upload was successful',
             },
             document: {
               $ref: '#/components/schemas/Document',
             },
+          },
+          example: {
+            success: true,
+            document: {
+              id: "550e8400-e29b-41d4-a716-446655440000",
+              fileName: "example.pdf",
+              fileType: "pdf",
+              chunkCount: 45,
+              createdAt: "2024-01-15T10:30:00.000Z",
+              updatedAt: "2024-01-15T10:30:00.000Z"
+            }
           },
         },
         DocumentsListResponse: {
@@ -132,8 +145,12 @@ const options = {
             },
             documentId: {
               type: 'string',
-              description: 'Optional document ID to scope the question to a specific document',
+              description: 'Optional: Document ID. If not provided, automatically uses the most recently uploaded document.',
+              example: '550e8400-e29b-41d4-a716-446655440000',
             },
+          },
+          example: {
+            question: 'What is the main topic of this document?',
           },
         },
         ContextChunk: {
@@ -188,12 +205,34 @@ const options = {
             },
             confidenceLevel: {
               type: 'string',
-              enum: ['low', 'medium', 'high'],
-              description: 'Confidence level classification',
+              enum: ['very_low', 'low', 'medium', 'high'],
+              description: 'Confidence level classification (very_low, low, medium, high)',
             },
             confidenceDetail: {
               type: 'object',
               description: 'Detailed confidence metrics',
+              properties: {
+                avgSim: {
+                  type: 'number',
+                  format: 'float',
+                  description: 'Average similarity score of retrieved chunks',
+                },
+                topSim: {
+                  type: 'number',
+                  format: 'float',
+                  description: 'Highest similarity score among retrieved chunks',
+                },
+                coverage: {
+                  type: 'number',
+                  format: 'float',
+                  description: 'Percentage of chunks above similarity threshold',
+                },
+                answerOverlap: {
+                  type: 'number',
+                  format: 'float',
+                  description: 'Keyword overlap between answer and context',
+                },
+              },
             },
             learningEnabled: {
               type: 'boolean',

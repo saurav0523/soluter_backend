@@ -8,10 +8,26 @@ import confidenceUtil from '../utils/confidence.js';
 
 const askQuestion = async (req, res, next) => {
   try {
-    const { question, documentId } = req.body;
+    let { question, documentId } = req.body;
 
     if (!question) {
       return res.status(400).json({ error: 'Question is required' });
+    }
+
+    // If documentId is not provided, use the latest uploaded document
+    if (!documentId) {
+      const latestDoc = await prisma.document.findFirst({
+        orderBy: { createdAt: 'desc' },
+        select: { id: true },
+      });
+      
+      if (!latestDoc) {
+        return res.status(404).json({ 
+          error: 'No documents found. Please upload a document first.' 
+        });
+      }
+      
+      documentId = latestDoc.id;
     }
 
     const cachedAnswer = await redisCache.getCachedLearnedAnswer(question);
@@ -90,16 +106,37 @@ const askQuestion = async (req, res, next) => {
     });
 
     if (confidenceUtil.shouldRejectAnswer(confidenceData.confidence, answer)) {
+      // Sort chunks by score (best first) and take top chunks
+      const sortedChunks = [...chunks]
+        .sort((a, b) => (b.score || 0) - (a.score || 0))
+        .slice(0, 3); // Take top 3 best scoring chunks
+      
+      const bestChunks = sortedChunks.map(c => ({
+        chunk: c.content,
+        score: c.score,
+        documentName: c.documentName,
+      }));
+
+      // Create a helpful answer using the best chunks
+      let helpfulAnswer = 'I cannot find the exact answer to your question, but based on my analysis, here\'s some related information that might be helpful:\n\n';
+      
+      if (bestChunks.length > 0) {
+        // Use the best chunk's content as the answer
+        const bestChunkText = bestChunks[0].chunk;
+        // Limit to reasonable length to avoid too long responses
+        helpfulAnswer += bestChunkText.length > 800 
+          ? bestChunkText.substring(0, 800) + '...' 
+          : bestChunkText;
+      } else {
+        helpfulAnswer += 'No relevant information found in the document.';
+      }
+
       return res.json({
         question,
-        answer: 'I cannot find this information in the uploaded document.',
+        answer: helpfulAnswer,
         queryId: null,
         answerId: null,
-        context: chunks.map(c => ({
-          chunk: c.content,
-          score: c.score,
-          documentName: c.documentName,
-        })),
+        context: bestChunks,
         confidence: confidenceData.confidence,
         confidenceLevel: confidenceData.level,
         confidenceDetail: confidenceData.detail,
