@@ -118,17 +118,17 @@ const askQuestion = async (req, res, next) => {
       }));
 
       // Create a helpful answer using the best chunks
-      let helpfulAnswer = 'I cannot find the exact answer to your question, but based on my analysis, here\'s some related information that might be helpful:\n\n';
+      let helpfulAnswer = 'I cannot find the exact answer to your question in the document, but here is some related information that might be helpful:\n\n';
       
       if (bestChunks.length > 0) {
-        // Use the best chunk's content as the answer
-        const bestChunkText = bestChunks[0].chunk;
-        // Limit to reasonable length to avoid too long responses
-        helpfulAnswer += bestChunkText.length > 800 
-          ? bestChunkText.substring(0, 800) + '...' 
-          : bestChunkText;
+        // Concatenate best chunks for a more comprehensive "fallback" answer
+        helpfulAnswer += bestChunks.map(c => c.chunk).join('\n\n---\n\n');
+        
+        if (helpfulAnswer.length > 1500) {
+          helpfulAnswer = helpfulAnswer.substring(0, 1500) + '... [Response truncated, please try a more specific question]';
+        }
       } else {
-        helpfulAnswer += 'No relevant information found in the document.';
+        helpfulAnswer = 'No relevant information was found in the document to answer your question.';
       }
 
       return res.json({

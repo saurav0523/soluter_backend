@@ -37,6 +37,14 @@ app.use('/api/ask', askRoutes);
 app.use('/api/docs', docRoutes);
 app.use('/api/feedback', feedbackRoutes);
 
+app.get('/', (req, res) => {
+  res.json({
+    message: 'Welcome to Soluter Backend API',
+    docs: '/api-docs',
+    health: '/health'
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
