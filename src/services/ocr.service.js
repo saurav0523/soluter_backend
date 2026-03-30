@@ -8,16 +8,16 @@ const getWorker = async () => {
   if (workerPool.length > 0) {
     return workerPool.pop();
   }
-  
+
   const worker = await createWorker('eng', 1, {
-    logger: () => {},
+    logger: () => { },
   });
-  
+
   await worker.setParameters({
     tessedit_pageseg_mode: '1',
     tessedit_char_whitelist: '',
   });
-  
+
   return worker;
 };
 
@@ -34,9 +34,9 @@ const extractText = async (filePath) => {
   try {
     worker = await getWorker();
     const { data: { text } } = await worker.recognize(filePath, {
-      rectangle: null, // Process entire image
+      rectangle: null,
     });
-    
+
     returnWorker(worker);
     return text;
   } catch (error) {

@@ -1,6 +1,6 @@
 
 class CacheService {
-  constructor(maxSize = 1000, ttl = 3600000) { // 1 hour default TTL
+  constructor(maxSize = 1000, ttl = 3600000) {
     this.cache = new Map();
     this.maxSize = maxSize;
     this.ttl = ttl;
