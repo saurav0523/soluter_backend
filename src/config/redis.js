@@ -1,41 +1,43 @@
 import Redis from 'ioredis';
+import { Redis as UpstashRedis } from '@upstash/redis';
+import crypto from 'crypto';
 
-const redisConfig = {
-  host: process.env.REDIS_HOST || 'localhost',
-  port: parseInt(process.env.REDIS_PORT) || 6379,
-  password: process.env.REDIS_PASSWORD || undefined,
-  db: parseInt(process.env.REDIS_DB) || 0,
-  retryStrategy: (times) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: false,
-};
+const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  })
+  : new Redis({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB) || 0,
+    tls: process.env.REDIS_TLS === 'true' ? { rejectUnauthorized: false } : undefined,
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  });
 
-if (process.env.REDIS_TLS === 'true') {
-  redisConfig.tls = {
-    rejectUnauthorized: false
-  };
-}
-
-const redis = new Redis(redisConfig);
+export const upstash = (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+  ? new UpstashRedis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  })
+  : null;
 
 redis.on('connect', () => {
-  console.log('Redis client connected');
+  console.log('Redis TCP client connected');
 });
 
 redis.on('ready', () => {
-  console.log('Redis client ready');
+  console.log('Redis TCP client ready');
 });
 
 redis.on('error', (error) => {
-  console.error('Redis client error:', error);
+  console.error('Redis TCP client error:', error.message);
 });
 
 redis.on('close', () => {
-  console.log('Redis client connection closed');
+  console.log('Redis TCP client connection closed');
 });
 
 process.on('beforeExit', async () => {
@@ -49,8 +51,6 @@ export const normalizeQuestion = (question) => {
     .replace(/\s+/g, ' ')
     .replace(/[^\w\s]/g, '');
 };
-
-import crypto from 'crypto';
 
 export const hashQuestion = (question) => {
   return crypto.createHash('sha1').update(normalizeQuestion(question)).digest('hex');

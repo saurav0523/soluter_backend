@@ -20,8 +20,6 @@ const chunkText = async (text) => {
 
     const chunks = await textSplitter.splitText(trimmedText);
     const validChunks = chunks.filter(chunk => chunk.trim().length > 0);
-    
-    // If text is shorter than chunk size, return it as a single chunk
     if (validChunks.length === 0 && trimmedText.length > 0) {
       return [trimmedText];
     }

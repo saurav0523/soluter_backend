@@ -6,11 +6,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Try loading .env from multiple locations
 const rootEnvPath = path.resolve(__dirname, '../../.env');
 const backendEnvPath = path.resolve(__dirname, '../.env');
 
-// Load root .env first, then backend/.env (backend/.env will override root)
 dotenv.config({ path: rootEnvPath });
 dotenv.config({ path: backendEnvPath });
 
@@ -29,7 +27,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Swagger documentation
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'Soluter Backend API Documentation',
