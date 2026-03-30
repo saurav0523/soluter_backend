@@ -1,6 +1,6 @@
 # Soluter Backend
 
-Backend API for document processing and RAG (Retrieval-Augmented Generation) system with learning capabilities and Redis integration for performance and real-time updates.
+Backend API for document processing and RAG (Retrieval-Augmented Generation) system with learning capabilities, Upstash Redis integration for performance and real-time updates, and AWS S3 for file storage.
 
 ## Features
 
@@ -10,12 +10,14 @@ Backend API for document processing and RAG (Retrieval-Augmented Generation) sys
   - Text extraction from PDFs
   - Document chunking and embedding generation
   - Graph-RAG for relationship mapping between chunks
+  - **File storage via AWS S3** (replaces Cloudflare R2)
 
 - **Question Answering**
   - RAG-based question answering using HuggingFace LLMs
   - Dual-model approach (fast model with automatic escalation to accurate model)
   - Semantic similarity search using vector embeddings
   - Confidence scoring and quality assessment
+  - **Task-specific embeddings** (`retrieval.query` for questions, `retrieval.passage` for chunks) for improved accuracy
 
 - **Learning System**
   - Query and answer storage for learning from interactions
@@ -25,7 +27,8 @@ Backend API for document processing and RAG (Retrieval-Augmented Generation) sys
   - Feedback collection and quality improvement
 
 - **Performance & Real-time**
-  - **Redis caching** for fast query responses (40-50x faster lookups)
+  - **Upstash Redis REST** for fast caching (queries, embeddings, answers)
+  - **Upstash Redis TCP (ioredis)** for Pub/Sub real-time event notifications and queues
   - **Redis queues** for async job processing
   - **Redis pub/sub** for real-time event notifications
   - **Redis timeouts** for query expiration management
@@ -50,31 +53,17 @@ npx prisma generate
 npx prisma migrate dev
 ```
 
-4. Install and Start Redis:
+4. **Redis via Upstash (no local Redis required)**:
 
-**macOS:**
-```bash
-brew install redis
-brew services start redis
-```
+This project uses **Upstash** as the Redis provider. No local Redis installation is needed.
 
-**Ubuntu/Debian:**
-```bash
-sudo apt-get update
-sudo apt-get install redis-server
-sudo systemctl start redis-server
-sudo systemctl enable redis-server
-```
+- Go to [https://upstash.com](https://upstash.com) and create a free Redis database.
+- Copy the **REST URL**, **REST Token**, and **TCP connection string** into your `.env`.
 
-**Windows:**
-- Download Redis from: https://github.com/microsoftarchive/redis/releases
-- Or use WSL2 and follow Ubuntu instructions
-- Or use Chocolatey: `choco install redis-64`
-
-**Verify Redis is running:**
-```bash
-redis-cli ping
-# Should return: PONG
+```env
+UPSTASH_REDIS_REST_URL="https://<your-db>.upstash.io"
+UPSTASH_REDIS_REST_TOKEN="<your-rest-token>"
+REDIS_URL="rediss://default:<your-rest-token>@<your-db>.upstash.io:6379"
 ```
 
 5. Start the server:
@@ -93,50 +82,59 @@ npm run worker:timeout
 
 ## API Endpoints
 
+- `GET /` - Welcome page with links to docs and health check
 - `POST /api/upload` - Upload documents (PDF/Image/Text)
 - `POST /api/ask` - Ask questions about uploaded documents
 - `GET /api/docs` - Get all documents metadata
 - `GET /api/docs/:id` - Get specific document by ID
 - `POST /api/feedback` - Submit feedback for queries/answers
 - `GET /health` - Health check endpoint
-- `GET /api-docs` - Swagger API documentation
+- `GET /api-docs` - Swagger API documentation (interactive)
 
 ## Tech Stack
 
-- **Framework**: Express.js
-- **Database**: PostgreSQL with Prisma ORM
-- **Vector Storage**: pgvector extension for semantic search
-- **Caching & Queues**: Redis (ioredis)
-- **LLM**: HuggingFace Inference API (dual-model: fast + accurate)
-- **Embeddings**: Jina AI (cloud, default) - Ollama is optional fallback for local embeddings
-- **OCR**: Tesseract.js
-- **PDF Processing**: pdf-parse
-- **API Documentation**: Swagger (swagger-jsdoc, swagger-ui-express)
+| Layer | Technology |
+|---|---|
+| **Framework** | Express.js |
+| **Database** | PostgreSQL with Prisma ORM |
+| **Vector Storage** | pgvector extension for semantic search |
+| **Caching & Queues** | Upstash Redis (REST + TCP/ioredis hybrid) |
+| **File Storage** | AWS S3 (`@aws-sdk/client-s3`) |
+| **LLM** | HuggingFace Inference API (dual-model: fast + accurate) |
+| **Embeddings** | Jina AI (`jina-embeddings-v3`, task-specific) |
+| **OCR** | Tesseract.js |
+| **PDF Processing** | pdf-parse |
+| **API Documentation** | Swagger (swagger-jsdoc, swagger-ui-express) |
 
-## Redis Integration
+## Redis Integration (Upstash)
 
-This system uses Redis for:
-- **Caching**: Query results, embeddings, learned answers (40-50x faster lookups)
-- **Queues**: Async processing of documents, feedback, and background jobs
-- **Pub/Sub**: Real-time event notifications (new queries, answer updates)
-- **Timeouts**: Query expiration management (default: 600 seconds)
+This system uses a **hybrid Upstash Redis** setup:
 
-**Setup Redis locally** (no Docker required):
-- macOS: `brew install redis && brew services start redis`
-- Ubuntu: `sudo apt-get install redis-server && sudo systemctl start redis-server`
+| Client | Protocol | Used For |
+|---|---|---|
+| `upstash` (REST) | HTTPS | Caching (queries, embeddings, answers) |
+| `redis` (TCP/ioredis) | TLS | Pub/Sub, blocking queues, real-time events |
 
-**Verify Redis is running:**
-```bash
-redis-cli ping
-# Should return: PONG
-```
+The REST client is more resilient and works behind serverless/cloud environments. The TCP client is retained because Pub/Sub and blocking operations (`BRPOP`) are not supported over REST.
+
+**No local Redis installation required.** All Redis connections are routed to Upstash over the internet.
+
+## File Storage (AWS S3)
+
+Documents uploaded via `/api/upload` are stored in an **AWS S3 bucket**.
+
+- Local temp files are cleaned up automatically after upload.
+- The S3 URL is stored in the database for retrieval during PDF processing.
+- Falls back to local storage if S3 credentials are not configured.
+
+> **Note**: Ensure the IAM user has `s3:PutObject`, `s3:GetObject`, and `s3:DeleteObject` permissions on the configured bucket.
 
 ## Database Schema
 
 The system uses PostgreSQL with pgvector extension for vector similarity search:
 
-- **Document**: Stores uploaded documents with metadata
-- **Chunk**: Document chunks with vector embeddings
+- **Document**: Stores uploaded documents with metadata and S3 URLs
+- **Chunk**: Document chunks with 768-dimensional vector embeddings
 - **Relationship**: Graph relationships between chunks (Graph-RAG)
 - **Query**: User queries with question embeddings
 - **QueryAnswer**: Generated answers with quality scores
@@ -144,21 +142,48 @@ The system uses PostgreSQL with pgvector extension for vector similarity search:
 
 ## Environment Variables
 
-Required environment variables (see `.env.example` for template):
+```env
+# Database
+DATABASE_URL="postgresql://..."
 
-- `DATABASE_URL` - PostgreSQL connection string with pgvector
-- `REDIS_URL` - Redis connection URL
-- `HF_CHAT_API_KEY` - HuggingFace API key for LLM (required)
-- `HF_FAST_MODEL` - HuggingFace model for fast responses (required)
-- `HF_ACCURATE_MODEL` - HuggingFace model for accurate responses (required)
-- `USE_CLOUD_EMBEDDINGS` - Set to 'true' for Jina AI embeddings (default: 'true', requires `HF_API_KEY`)
-- `HF_API_KEY` - Used for Jina AI embeddings when `USE_CLOUD_EMBEDDINGS=true` (required if using cloud embeddings)
-- `OLLAMA_BASE_URL` - Optional: Ollama server URL (only if `USE_CLOUD_EMBEDDINGS=false` for local embeddings)
-- `OLLAMA_EMBEDDING_MODEL` - Optional: Ollama embedding model name (only if using local embeddings)
-- `PORT` - Server port (default: 3000)
-- `NODE_ENV` - Environment (development/production)
+# HuggingFace (LLM)
+HF_CHAT_API_KEY=hf_...
+HF_CHAT_URL=https://router.huggingface.co/v1/chat/completions
+HF_FAST_MODEL=Qwen/Qwen2.5-7B-Instruct
+HF_ACCURATE_MODEL=Qwen/Qwen2.5-7B-Instruct
 
-**Note**: The system uses HuggingFace for LLM generation. Ollama is only used as an optional fallback for embeddings if you set `USE_CLOUD_EMBEDDINGS=false`. By default, Jina AI (cloud) embeddings are used.
+# Embeddings (Jina AI)
+HF_API_KEY=jina_...          # Jina AI key (used for cloud embeddings)
+USE_CLOUD_EMBEDDINGS=true    # Set false to use local Ollama embeddings
+
+# Server
+PORT=3000
+NODE_ENV=production
+
+# File Upload
+MAX_FILE_SIZE=10485760       # 10 MB
+
+# Redis (Upstash)
+UPSTASH_REDIS_REST_URL="https://<db>.upstash.io"
+UPSTASH_REDIS_REST_TOKEN="<rest-token>"
+REDIS_URL="rediss://default:<rest-token>@<db>.upstash.io:6379"
+
+# AWS S3 Storage
+AWS_S3_ACCESS_KEY_ID=...
+AWS_S3_SECRET_ACCESS_KEY=...
+AWS_S3_REGION=ap-south-1
+AWS_S3_BUCKET_NAME=<your-bucket>
+# AWS_S3_ENDPOINT=...        # Optional: only for custom S3-compatible endpoints
+
+# Optional: Local Ollama (only if USE_CLOUD_EMBEDDINGS=false)
+# OLLAMA_BASE_URL=http://localhost:11434
+# OLLAMA_EMBEDDING_MODEL=nomic-embed-text
+```
+
+## Known Issues / Notes
+
+- **Jina AI Rate Limit (429)**: The free tier of Jina AI limits to 2 concurrent embedding requests. If you upload large documents with many chunks, you may see `RATE_CONCURRENCY_LIMIT_EXCEEDED` warnings. This is expected — the system will successfully embed the remaining chunks on retry. Upgrade to a paid Jina AI plan to remove this limit.
+- **S3 IAM Permissions**: Ensure your IAM user has `s3:PutObject` permission on the bucket. Without it, file uploads will fall back to local storage and S3 URLs will not be stored.
 
 ## Development
 
@@ -177,3 +202,7 @@ Generate Prisma client after schema changes:
 npm run prisma:generate
 ```
 
+Apply database migrations:
+```bash
+npm run prisma:migrate
+```
