@@ -2,6 +2,11 @@ import prisma from '../config/db.js';
 import embedService from './embed.service.js';
 import rerankService from './rerank.service.js';
 import redisCache from './redis-cache.service.js';
+import {
+  MAX_CONTEXT_CHUNKS,
+  MIN_CONTEXT_CHUNKS,
+  SIMILARITY_THRESHOLD,
+} from '../utils/constants.js';
 
 const formatEmbeddingForPG = (emb) => {
   return `[${emb.map(n => {
@@ -81,18 +86,16 @@ const cosineSimFromArrays = (a, b) => {
 
 const retrieveContext = async (question, documentId = null, options = {}) => {
   try {
-    // Check cache first
     const cached = await redisCache.getCachedQuery(question, documentId);
     if (cached) {
       return cached;
     }
 
-    const topK = options.topK ?? 5;
+    const topK = options.topK ?? MAX_CONTEXT_CHUNKS;
     const expandNeighborsCount = options.expandNeighborsCount ?? 5;
     const vectorDim = options.vectorDim ?? 768;
     const useReranking = options.useReranking ?? true;
 
-    // Use provided embedding if available (for parallel operations), otherwise generate
     let qEmb;
     if (options.questionEmbedding) {
       qEmb = options.questionEmbedding;
@@ -190,22 +193,22 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
     merged.sort((a, b) => (b.score || 0) - (a.score || 0));
 
     const topScore = merged[0]?.score ?? 0;
-    const adaptiveThreshold = Math.max(0.45, topScore * 0.6);
+    const adaptiveThreshold = Math.max(SIMILARITY_THRESHOLD, topScore * 0.6);
 
-    let finalChunks = merged.filter(c => (c.score ?? 0) >= adaptiveThreshold).slice(0, 10);
+    let finalChunks = merged
+      .filter(c => (c.score ?? 0) >= adaptiveThreshold)
+      .slice(0, MAX_CONTEXT_CHUNKS);
 
-    if (finalChunks.length < 3) {
-      finalChunks = merged.slice(0, Math.min(3, merged.length));
+    if (finalChunks.length < MIN_CONTEXT_CHUNKS) {
+      finalChunks = merged.slice(0, Math.min(MIN_CONTEXT_CHUNKS, merged.length));
     }
 
-    // Apply re-ranking for better context selection
     if (useReranking && finalChunks.length > topK) {
       finalChunks = await rerankService.rerankChunks(question, finalChunks, topK);
     } else {
       finalChunks = finalChunks.slice(0, topK);
     }
-
-    // Cache the result
+    
     await redisCache.cacheQuery(question, documentId, finalChunks);
 
     return finalChunks;

@@ -1,26 +1,61 @@
 import pdfParse from 'pdf-parse';
 import fs from 'fs/promises';
 import storageService from './storage.service.js';
+import ocrService from './ocr.service.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const MIN_TEXT_LENGTH = 10;
 
 const extractText = async (filePath, storageType = 'local') => {
+  let actualFilePath = filePath;
+  let tempFiles = [];
+
   try {
-    const actualFilePath = storageType === 'gcs' 
-      ? await storageService.getFile(filePath, 'gcs')
-      : filePath;
-    
+    if (storageType === 's3') {
+      actualFilePath = await storageService.getFile(filePath, 's3');
+      tempFiles.push(actualFilePath);
+    }
+
     const dataBuffer = await fs.readFile(actualFilePath);
     const data = await pdfParse(dataBuffer);
-    
-    if (storageType === 'gcs' && actualFilePath !== filePath) {
+
+    let extractedText = data.text || '';
+
+    if (!extractedText || extractedText.trim().length < MIN_TEXT_LENGTH) {
       try {
-        await fs.unlink(actualFilePath);
-      } catch (error) {
+        if (extractedText && extractedText.trim().length > 0) {
+          return extractedText.trim();
+        }
+
+        throw new Error(
+          'PDF appears to be image-based (scanned document). ' +
+          'Text extraction returned empty. ' +
+          'Please ensure the PDF has selectable text, or use an image file directly for OCR processing.'
+        );
+      } catch (ocrError) {
+        if (extractedText && extractedText.trim().length > 0) {
+          return extractedText.trim();
+        }
+        throw ocrError;
+      }
+    }
+
+    return extractedText.trim();
+  } catch (error) {
+    for (const tempFile of tempFiles) {
+      try {
+        if (tempFile !== filePath) {
+          await fs.unlink(tempFile);
+        }
+      } catch (cleanupError) {
         // Ignore cleanup errors
       }
     }
-    
-    return data.text;
-  } catch (error) {
+
     throw new Error(`PDF extraction failed: ${error.message}`);
   }
 };

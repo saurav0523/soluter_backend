@@ -23,7 +23,19 @@ const uploadDocument = async (req, res, next) => {
 
     switch (fileType) {
       case 'pdf':
-        extractedText = await pdfService.extractText(filePath);
+        try {
+          extractedText = await pdfService.extractText(filePath);
+        } catch (error) {
+          // If PDF extraction fails, provide helpful error
+          if (error.message.includes('image-based') || error.message.includes('scanned')) {
+            return res.status(400).json({ 
+              error: 'PDF appears to be image-based (scanned document). ' +
+                     'Please ensure the PDF has selectable text, or convert PDF pages to images and upload them separately for OCR processing.',
+              suggestion: 'For scanned PDFs, you can: 1) Use a PDF editor to add text layer, 2) Convert PDF to images and upload them, or 3) Use a tool to OCR the PDF first.'
+            });
+          }
+          throw error;
+        }
         break;
       case 'image':
         extractedText = await ocrService.extractText(filePath);
@@ -36,28 +48,41 @@ const uploadDocument = async (req, res, next) => {
         return res.status(400).json({ error: 'Unsupported file type' });
     }
 
+
+    if (!extractedText || extractedText.trim().length === 0) {
+      return res.status(400).json({ 
+        error: 'No text could be extracted from the document.',
+        fileType: fileType,
+        suggestion: fileType === 'pdf' 
+          ? 'The PDF might be image-based. Try converting it to images or use a PDF with selectable text.'
+          : 'Please ensure the document contains readable text.'
+      });
+    }
+
     const chunks = await chunkService.chunkText(extractedText);
 
-    // Upload file to cloud storage (if configured) or keep local
-    // We'll get document ID first, then upload
+    if (!chunks || chunks.length === 0) {
+      return res.status(400).json({ 
+        error: 'Document could not be chunked. The extracted text might be too short or invalid.',
+        extractedTextLength: extractedText.length
+      });
+    }
     const tempDocument = await prisma.document.create({
       data: {
         fileName,
         fileType,
-        filePath, // Temporary local path
+        filePath,
         text: extractedText,
         chunkCount: chunks.length,
       },
     });
 
-    // Upload to cloud storage and get final file path
     const storageResult = await storageService.uploadFile(
       filePath,
       fileName,
       tempDocument.id
     );
 
-    // Update document with final file path (cloud or local)
     const document = await prisma.document.update({
       where: { id: tempDocument.id },
       data: {
@@ -65,64 +90,69 @@ const uploadDocument = async (req, res, next) => {
       },
     });
 
-    // Parallel processing: Generate embeddings
-    const embeddings = await embedService.generateEmbeddings(chunks);
+    let embeddings;
+    try {
+      embeddings = await embedService.generateEmbeddings(chunks);
+    } catch (error) {
+      console.error('Embedding generation error:', error);
+      throw new Error(`Failed to generate embeddings: ${error.message}`);
+    }
 
-    // Validate embeddings
     if (!embeddings || embeddings.length === 0) {
-      throw new Error('Failed to generate embeddings for document');
+      console.error('No embeddings generated. Chunks count:', chunks.length);
+      throw new Error('Failed to generate embeddings for document. All embedding attempts failed. Check server logs for details.');
     }
 
-    if (embeddings.length !== chunks.length) {
-      console.warn(`Warning: Generated ${embeddings.length} embeddings for ${chunks.length} chunks. Some chunks may be missing embeddings.`);
-    }
-
-    // Batch insert chunks using transaction for better performance
-    const BATCH_SIZE = 50;
+    const transactionTimeout = Math.max(60000, 60000 + Math.ceil(chunks.length / 10) * 3000);
+    const BATCH_SIZE = 100;
     
-    // Use transaction for atomicity and better performance
     await prisma.$transaction(async (tx) => {
       for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
         const batch = chunks.slice(i, i + BATCH_SIZE);
         const batchEmbeddings = embeddings.slice(i, i + BATCH_SIZE);
         
-        // Build batch insert query - filter out chunks without embeddings
-        const insertPromises = batch.map((chunk, idx) => {
-          const embedding = batchEmbeddings[idx];
-          
-          // Skip if embedding is missing or invalid
-          if (!embedding || !Array.isArray(embedding) || embedding.length === 0) {
-            console.warn(`Skipping chunk ${i + idx}: embedding is missing or invalid`);
-            return null;
-          }
-
-          const embeddingString = `[${embedding.join(',')}]`;
-          return tx.$executeRawUnsafe(
-            `INSERT INTO "Chunk" (id, "documentId", content, embedding, "chunkIndex", "createdAt")
-             VALUES (gen_random_uuid()::text, $1, $2, $3::vector(768), $4, NOW())`,
-            document.id,
+        const validChunks = batch
+          .map((chunk, idx) => ({
             chunk,
-            embeddingString,
-            i + idx
-          );
-        }).filter(promise => promise !== null); // Remove null promises
+            embedding: batchEmbeddings[idx],
+            index: i + idx
+          }))
+          .filter(item => item.embedding && Array.isArray(item.embedding) && item.embedding.length > 0);
         
-        // Execute batch in parallel within transaction
-        if (insertPromises.length > 0) {
+        if (validChunks.length === 0) {
+          continue;
+        }
+        
+        const CONCURRENT_INSERTS = 5;
+        for (let j = 0; j < validChunks.length; j += CONCURRENT_INSERTS) {
+          const concurrentBatch = validChunks.slice(j, j + CONCURRENT_INSERTS);
+          
+          const insertPromises = concurrentBatch.map((item) => {
+            const embeddingString = `[${item.embedding.join(',')}]`;
+            return tx.$executeRawUnsafe(
+              `INSERT INTO "Chunk" (id, "documentId", content, embedding, "chunkIndex", "createdAt")
+               VALUES (gen_random_uuid()::text, $1, $2, $3::vector(768), $4, NOW())`,
+              document.id,
+              item.chunk,
+              embeddingString,
+              item.index
+            );
+          });
+        
           await Promise.all(insertPromises);
         }
       }
+    }, {
+      timeout: transactionTimeout,
+      maxWait: transactionTimeout
     });
 
-    // Build relationships in background (non-blocking)
     graphService.buildRelationships(document.id, chunks).catch(error => {
       console.error('Graph relationship building failed:', error);
     });
-
-    // Publish document processed event
+    
     await redisPubSub.publishDocumentProcessed(document.id, document.fileName, document.chunkCount);
 
-    // Push to queue for async processing (analytics, notifications, etc.)
     await redisQueue.pushDocumentJob(document.id, document.fileName);
 
     res.json({

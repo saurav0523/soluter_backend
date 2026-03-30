@@ -1,10 +1,8 @@
-// Import config first to load environment variables
-import './config/env.js';
-import { config } from './config/env.js';
 import app from './app.js';
 
-app.listen(config.port, () => {
-  console.log(`Server running on http://localhost:${config.port}`);
-  console.log(`Environment: ${config.nodeEnv}`);
+const port = process.env.PORT || 3000;
+app.listen(port,'0.0.0.0', () => {
+  console.log(`Server running on http://localhost:${port}`);
+  console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

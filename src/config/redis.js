@@ -1,46 +1,49 @@
-// Import env first to ensure environment variables are loaded
-import './env.js';
 import Redis from 'ioredis';
-import { config } from './env.js';
+import { Redis as UpstashRedis } from '@upstash/redis';
+import crypto from 'crypto';
 
-// Create Redis client with connection pooling
-const redis = new Redis({
-  host: config.redisHost || 'localhost',
-  port: config.redisPort || 6379,
-  password: config.redisPassword || undefined,
-  db: config.redisDb || 0,
-  retryStrategy: (times) => {
-    const delay = Math.min(times * 50, 2000);
-    return delay;
-  },
-  maxRetriesPerRequest: 3,
-  enableReadyCheck: true,
-  lazyConnect: false,
-});
+const redis = process.env.REDIS_URL
+  ? new Redis(process.env.REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  })
+  : new Redis({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: parseInt(process.env.REDIS_PORT) || 6379,
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB) || 0,
+    tls: process.env.REDIS_TLS === 'true' ? { rejectUnauthorized: false } : undefined,
+    maxRetriesPerRequest: 3,
+    retryStrategy: (times) => Math.min(times * 50, 2000),
+  });
 
-// Redis connection event handlers
+export const upstash = (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN)
+  ? new UpstashRedis({
+    url: process.env.UPSTASH_REDIS_REST_URL,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN,
+  })
+  : null;
+
 redis.on('connect', () => {
-  console.log('Redis client connected');
+  console.log('Redis TCP client connected');
 });
 
 redis.on('ready', () => {
-  console.log('Redis client ready');
+  console.log('Redis TCP client ready');
 });
 
 redis.on('error', (error) => {
-  console.error('Redis client error:', error);
+  console.error('Redis TCP client error:', error.message);
 });
 
 redis.on('close', () => {
-  console.log('Redis client connection closed');
+  console.log('Redis TCP client connection closed');
 });
 
-// Graceful shutdown
 process.on('beforeExit', async () => {
   await redis.quit();
 });
 
-// Helper function to normalize question for cache key
 export const normalizeQuestion = (question) => {
   return question
     .toLowerCase()
@@ -48,9 +51,6 @@ export const normalizeQuestion = (question) => {
     .replace(/\s+/g, ' ')
     .replace(/[^\w\s]/g, '');
 };
-
-// Helper function to generate cache key hash
-import crypto from 'crypto';
 
 export const hashQuestion = (question) => {
   return crypto.createHash('sha1').update(normalizeQuestion(question)).digest('hex');

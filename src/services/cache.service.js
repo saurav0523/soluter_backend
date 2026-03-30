@@ -1,12 +1,10 @@
-// Simple in-memory cache for frequently accessed queries
-// Can be replaced with Redis for production
 
 class CacheService {
-  constructor(maxSize = 1000, ttl = 3600000) { // 1 hour default TTL
+  constructor(maxSize = 1000, ttl = 3600000) {
     this.cache = new Map();
     this.maxSize = maxSize;
     this.ttl = ttl;
-    this.accessOrder = new Map(); // For LRU eviction
+    this.accessOrder = new Map();
   }
 
   generateKey(prefix, ...args) {
@@ -17,20 +15,17 @@ class CacheService {
     const item = this.cache.get(key);
     if (!item) return null;
 
-    // Check if expired
     if (Date.now() > item.expiresAt) {
       this.cache.delete(key);
       this.accessOrder.delete(key);
       return null;
     }
 
-    // Update access order for LRU
     this.accessOrder.set(key, Date.now());
     return item.value;
   }
 
   set(key, value, customTTL = null) {
-    // Evict if cache is full (LRU)
     if (this.cache.size >= this.maxSize && !this.cache.has(key)) {
       this.evictLRU();
     }
@@ -46,7 +41,6 @@ class CacheService {
   evictLRU() {
     if (this.accessOrder.size === 0) return;
 
-    // Find least recently used
     let lruKey = null;
     let lruTime = Infinity;
 
@@ -73,10 +67,9 @@ class CacheService {
     this.accessOrder.clear();
   }
 
-  // Cache query results
   cacheQuery(question, documentId, result) {
     const key = this.generateKey('query', question, documentId);
-    this.set(key, result, 1800000); // 30 minutes for query results
+    this.set(key, result, 1800000);
   }
 
   getCachedQuery(question, documentId) {
@@ -84,10 +77,9 @@ class CacheService {
     return this.get(key);
   }
 
-  // Cache embeddings (longer TTL since they don't change)
   cacheEmbedding(text, embedding) {
     const key = this.generateKey('embedding', text);
-    this.set(key, embedding, 86400000); // 24 hours
+    this.set(key, embedding, 86400000);
   }
 
   getCachedEmbedding(text) {
@@ -96,7 +88,6 @@ class CacheService {
   }
 }
 
-// Singleton instance
 const cacheService = new CacheService();
 
 export default cacheService;

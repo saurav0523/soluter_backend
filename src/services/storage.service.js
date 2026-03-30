@@ -1,76 +1,105 @@
-// Cloud Storage Service - Google Cloud Storage (GCS) for PDF/file storage
-import { Storage } from '@google-cloud/storage';
-import { config } from '../config/env.js';
-import fs from 'fs/promises';
+import dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
+import fs from 'fs/promises';
 
-// Initialize GCS client (if credentials provided)
-let storage = null;
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootEnvPath = path.resolve(__dirname, '../../.env');
+const backendEnvPath = path.resolve(__dirname, '../.env');
+dotenv.config({ path: rootEnvPath });
+dotenv.config({ path: backendEnvPath });
+
+let s3Client = null;
 let bucketName = null;
 let useCloudStorage = false;
 
-if (config.gcsBucketName && config.gcsCredentialsPath) {
-  try {
-    storage = new Storage({
-      keyFilename: config.gcsCredentialsPath,
-      projectId: config.gcsProjectId,
-    });
-    bucketName = config.gcsBucketName;
-    useCloudStorage = true;
-    console.log('Google Cloud Storage initialized');
-  } catch (error) {
-    console.warn('GCS initialization failed, using local storage:', error.message);
-  }
-}
+const initializeS3Storage = () => {
+  const hasAccessKey = !!process.env.AWS_S3_ACCESS_KEY_ID;
+  const hasSecretKey = !!process.env.AWS_S3_SECRET_ACCESS_KEY;
+  const hasBucket = !!process.env.AWS_S3_BUCKET_NAME;
+  const hasRegion = !!process.env.AWS_S3_REGION;
+  const hasEndpoint = !!process.env.AWS_S3_ENDPOINT;
 
-/**
- * Upload file to cloud storage (GCS) or keep local
- */
+  if (!hasAccessKey || !hasSecretKey || !hasBucket || !hasRegion) {
+    return;
+  }
+
+  try {
+    const config = {
+      region: process.env.AWS_S3_REGION,
+      credentials: {
+        accessKeyId: process.env.AWS_S3_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_S3_SECRET_ACCESS_KEY,
+      },
+    };
+
+    if (hasEndpoint) {
+      config.endpoint = process.env.AWS_S3_ENDPOINT;
+      config.forcePathStyle = true;
+    }
+
+    s3Client = new S3Client(config);
+    bucketName = process.env.AWS_S3_BUCKET_NAME;
+    useCloudStorage = true;
+  } catch (error) {
+    console.error('S3 initialization failed, using local storage:', error.message);
+  }
+};
+
+initializeS3Storage();
+
 export const uploadFile = async (filePath, fileName, documentId) => {
   try {
-    if (useCloudStorage && storage) {
-      // Upload to GCS
+    if (useCloudStorage && s3Client) {
       const fileExtension = path.extname(fileName);
       const cloudFileName = `documents/${documentId}${fileExtension}`;
-      
-      await storage.bucket(bucketName).upload(filePath, {
-        destination: cloudFileName,
-        metadata: {
-          contentType: getContentType(fileExtension),
-          metadata: {
-            originalName: fileName,
-            documentId: documentId,
-          },
-        },
-      });
 
-      // Get public URL
-      const publicUrl = `gs://${bucketName}/${cloudFileName}`;
-      const httpsUrl = `https://storage.googleapis.com/${bucketName}/${cloudFileName}`;
-      
-      // Delete local file after upload
+      const fileContent = await fs.readFile(filePath);
+
+      await s3Client.send(new PutObjectCommand({
+        Bucket: bucketName,
+        Key: cloudFileName,
+        Body: fileContent,
+        ContentType: getContentType(fileExtension),
+        Metadata: {
+          originalName: fileName,
+          documentId: documentId,
+        },
+      }));
+
+      const region = process.env.AWS_S3_REGION;
+      const endpoint = process.env.AWS_S3_ENDPOINT;
+      let s3Url;
+
+      if (endpoint) {
+        s3Url = `${endpoint}/${bucketName}/${cloudFileName}`;
+      } else {
+        s3Url = `https://${bucketName}.s3.${region}.amazonaws.com/${cloudFileName}`;
+      }
+
       try {
         await fs.unlink(filePath);
       } catch (error) {
-        console.warn('Failed to delete local file:', error.message);
+        // Ignore cleanup errors
       }
 
       return {
-        filePath: httpsUrl,
-        storageType: 'gcs',
+        filePath: s3Url,
+        storageType: 's3',
         bucket: bucketName,
         cloudPath: cloudFileName,
       };
     } else {
-      // Use local storage
       return {
         filePath: filePath,
         storageType: 'local',
       };
     }
   } catch (error) {
-    console.error('File upload to cloud storage failed:', error);
-    // Fallback to local storage
+    console.error('File upload to S3 failed:', error.message);
     return {
       filePath: filePath,
       storageType: 'local',
@@ -78,58 +107,51 @@ export const uploadFile = async (filePath, fileName, documentId) => {
   }
 };
 
-/**
- * Download file from cloud storage or read local
- */
 export const getFile = async (filePath, storageType = 'local') => {
   try {
-    if (storageType === 'gcs' && storage) {
-      // Extract bucket and file path from GCS URL
-      const urlMatch = filePath.match(/gs:\/\/([^/]+)\/(.+)/) || 
-                       filePath.match(/https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)/);
-      
+    if (storageType === 's3' && s3Client) {
+      const urlMatch = filePath.match(/\/([^/]+\/[^/]+)$/);
+
       if (urlMatch) {
-        const bucket = urlMatch[1];
-        const filePath = urlMatch[2];
-        
-        // Download to temp file
-        const tempPath = `/tmp/${path.basename(filePath)}`;
-        await storage.bucket(bucket).file(filePath).download({ destination: tempPath });
-        
+        const key = urlMatch[1];
+
+        const response = await s3Client.send(new GetObjectCommand({
+          Bucket: bucketName,
+          Key: key,
+        }));
+
+        const tempPath = `/tmp/${path.basename(key)}`;
+        const fileContent = await response.Body.transformToByteArray();
+        await fs.writeFile(tempPath, fileContent);
+
         return tempPath;
       }
     }
-    
-    // Local file or fallback
+
     return filePath;
   } catch (error) {
-    console.error('File download from cloud storage failed:', error);
+    console.error('File download from S3 failed:', error);
     throw error;
   }
 };
 
-/**
- * Delete file from cloud storage
- */
 export const deleteFile = async (filePath, storageType = 'local') => {
   try {
-    if (storageType === 'gcs' && storage) {
-      const urlMatch = filePath.match(/gs:\/\/([^/]+)\/(.+)/) || 
-                       filePath.match(/https:\/\/storage\.googleapis\.com\/([^/]+)\/(.+)/);
-      
+    if (storageType === 's3' && s3Client) {
+      const urlMatch = filePath.match(/\/([^/]+\/[^/]+)$/);
       if (urlMatch) {
-        const bucket = urlMatch[1];
-        const filePath = urlMatch[2];
-        await storage.bucket(bucket).file(filePath).delete();
+        const key = urlMatch[1];
+        await s3Client.send(new DeleteObjectCommand({
+          Bucket: bucketName,
+          Key: key,
+        }));
         return true;
       }
     } else {
-      // Delete local file
       try {
         await fs.unlink(filePath);
         return true;
       } catch (error) {
-        console.warn('Failed to delete local file:', error.message);
         return false;
       }
     }
@@ -139,9 +161,6 @@ export const deleteFile = async (filePath, storageType = 'local') => {
   }
 };
 
-/**
- * Get content type from file extension
- */
 const getContentType = (extension) => {
   const contentTypes = {
     '.pdf': 'application/pdf',
@@ -156,11 +175,8 @@ const getContentType = (extension) => {
   return contentTypes[extension.toLowerCase()] || 'application/octet-stream';
 };
 
-/**
- * Check if cloud storage is available
- */
 export const isCloudStorageEnabled = () => {
-  return useCloudStorage && storage !== null;
+  return useCloudStorage && s3Client !== null;
 };
 
 export default {
@@ -169,4 +185,3 @@ export default {
   deleteFile,
   isCloudStorageEnabled,
 };
-
