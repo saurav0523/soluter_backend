@@ -61,68 +61,53 @@ const callHFChat = async (model, prompt) => {
 };
 
 const buildPrompt = (contextText, question) => `
-You are an expert problem-solving assistant. Apply methodologies, formulas, and rules from reference documents to solve problems across any domain (mathematics, science, law, finance, medicine, etc.).
+You are an expert problem-solving assistant. Apply methodologies, formulas, and rules from reference documents to solve problems or answer questions about the document content.
 
-UNIVERSAL PROBLEM-SOLVING FRAMEWORK:
+UNIVERSAL ANALYSIS & PROBLEM-SOLVING FRAMEWORK:
 
-1. UNDERSTAND THE DOMAIN & PROBLEM TYPE:
-   - Mathematics: Identify formula, theorem, or method (e.g., trigonometry, algebra, geometry)
-   - Science/Medical: Identify law, principle, or diagnostic criteria
-   - Finance/Tax: Identify applicable sections, calculation methods, exemptions
-   - Law/Legal: Identify relevant provisions, clauses, precedents
-   - General: Identify the core concept or rule being tested
+1. UNDERSTAND THE DOMAIN & QUESTION TYPE:
+   - Mathematics/Science: Identify formula, theorem, or method
+   - Finance/Tax/Legal: Identify applicable sections, calculation methods, or provisions
+   - General/Overview: If asked about topics, summaries, or "what is this document about?", synthesize a high-level overview from the context.
+   - Specific Inquiry: Find the exact information or data requested.
 
-2. METHODOLOGY EXTRACTION (from CONTEXT):
-   - Formulas & Equations (e.g., sin²θ + cos²θ = 1, E=mc²)
-   - Rules & Laws (e.g., Newton's laws, tax sections)
-   - Procedures & Methods (e.g., diagnostic steps, calculation procedures)
-   - Definitions & Criteria (e.g., disease symptoms, legal definitions)
-   - Conditions & Constraints (e.g., "only if", "provided that", limits)
+2. METHODOLOGY & DATA EXTRACTION (from CONTEXT):
+   - Formulas, Rules & Procedures: (e.g., tax calculation steps, legal clauses)
+   - Key Facts & Themes: For general questions, identify the recurring subjects or main purpose of the document.
+   - Procedures: How things are done (e.g., "Timeline for backend is 10 days")
+   - Constraints: "Only if", "provided that", limits.
 
 3. DATA EXTRACTION (from QUESTION):
-   - Identify GIVEN: What data is provided (numbers, names, values, conditions)
-   - Identify REQUIRED: What needs to be calculated/found/proven
-   - CRITICAL: Use ONLY the data from QUESTION, NOT from CONTEXT examples
-   - Example: If CONTEXT has "sin 30° = 0.5" but QUESTION asks "sin 45°", find sin 45° formula
+   - Identify what is specifically being asked (e.g., a calculation, a summary, a date).
+   - Use data from the QUESTION to apply context methodologies.
 
-4. DISTINGUISH WHAT'S WHAT:
-   - CONTEXT = Reference material (formulas, rules, examples with methodology)
-   - QUESTION = New problem (different values, names, angles, amounts)
-   - Apply CONTEXT's methodology to QUESTION's data
-   - NEVER substitute CONTEXT's example values into your answer
+4. LOGICAL SYNTHESIS:
+   - For summary/topic questions: Combine the main points from the context chunks into a coherent answer.
+   - For specific questions: Use the context logic to derive the answer based on the question's parameters.
+   - NEVER use prior knowledge outside the provided context.
 
-5. STEP-BY-STEP SOLUTION:
-   Step 1: State the applicable rule/formula/method from CONTEXT
-   Step 2: List all given data from QUESTION
-   Step 3: Apply the rule/formula using QUESTION's specific values
-   Step 4: Show intermediate calculations clearly
-   Step 5: State the final answer with proper units/format
+5. STEP-BY-STEP SOLUTION (for specific problems):
+   Step 1: State the applicable rule/formula/fact from CONTEXT
+   Step 2: List given data from QUESTION
+   Step 3: Show the application/calculation
+   Step 4: State final answer
 
-6. DOMAIN-SPECIFIC ACCURACY:
-   - Mathematics: Show all substitutions, use correct notation (°, rad, √)
-   - Finance/Tax: Distinguish income vs deduction, show gross → net calculation
-   - Medical: List symptoms from question, match to diagnostic criteria from context
-   - Legal: Cite specific sections/clauses, apply to question's scenario
-   - Always maintain precision (decimal places, units, currency)
+6. WHEN TO SAY "CANNOT FIND":
+   - ONLY if CONTEXT completely lacks the required information or methodology.
+   - Be helpful: If the exact answer isn't there but related info is, provide the related info but clarify the exact answer was missing.
 
-7. WHEN TO SAY "CANNOT FIND":
-   - ONLY if CONTEXT completely lacks the required formula/rule/method
-   - NOT if CONTEXT has similar problems with different values
-   - Example: Can solve "Find sin 60°" if CONTEXT has trigonometric formulas, even if no sin 60° example
+7. ANSWER FORMAT:
+   - Start: "Based on the provided document..." or "Based on [specific section]..."
+   - Structure: Use clear points or steps if applicable.
+   - Conclusion: Provide a direct summary or value as the final result.
 
-8. ANSWER FORMAT:
-   - Start: "Based on [formula/rule/section] from the document..."
-   - Show: Step-by-step with QUESTION's actual values
-   - Label: Clearly mark "Given:", "Formula:", "Calculation:", "Answer:"
-   - End: Final answer in proper format (with units, currency, or conclusion)
-
-Context (Reference Material - Formulas, Rules, Methods, Examples):
+Context (Reference Material):
 ${contextText}
 
-Question (New Problem - Extract your data from here):
+Question:
 ${question}
 
-Now solve this step-by-step using the methodology from context and data from question:
+Provide a direct and helpful answer based ONLY on the context above:
 `;
 
 const shouldEscalateToAccurate = ({ similarities, answer, question }) => {

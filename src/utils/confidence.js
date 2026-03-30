@@ -37,24 +37,24 @@ const computeConfidence = ({ similarities = [], answer, contextText }) => {
 
   const avgSim = similarities.reduce((a, b) => a + b, 0) / similarities.length;
   const topSim = Math.max(...similarities);
-  const coverage = similarities.filter(s => s >= 0.78).length / similarities.length;
+  const coverage = similarities.filter(s => s >= 0.6).length / similarities.length;
   const answerOverlap = keywordOverlap(answer, contextText);
 
   const rawScore = (
-    0.4 * avgSim +
-    0.2 * topSim +
-    0.2 * coverage +
-    0.2 * answerOverlap
+    0.35 * avgSim +
+    0.25 * topSim +
+    0.15 * coverage +
+    0.25 * answerOverlap
   );
 
   const confidence = Math.max(0, Math.min(1, rawScore));
 
   let level;
-  if (confidence >= 0.8) {
+  if (confidence >= 0.7) {
     level = 'high';
-  } else if (confidence >= 0.6) {
+  } else if (confidence >= 0.5) {
     level = 'medium';
-  } else if (confidence >= 0.4) {
+  } else if (confidence >= 0.3) {
     level = 'low';
   } else {
     level = 'very_low';
@@ -73,9 +73,10 @@ const computeConfidence = ({ similarities = [], answer, contextText }) => {
 };
 
 const shouldRejectAnswer = (confidence, answer) => {
-  if (confidence < 0.3) return true;
-  
   const answerLower = answer.toLowerCase();
+
+  // If confidence is extremely low (< 0.22), we likely have nothing relevant
+  if (confidence < 0.22) return true;
   
   const hasCalculation = /[\d,]+/.test(answer) || 
                         /step \d|calculate|formula|₹|rs\.|amount/.test(answerLower);
@@ -88,7 +89,9 @@ const shouldRejectAnswer = (confidence, answer) => {
     'i cannot find this information',
     'information is not present',
     'document does not contain',
-    'no information available'
+    'no information available',
+    'not mentioned in the document',
+    'context does not provide'
   ];
   
   return strictNotFoundPhrases.some(phrase => answerLower.includes(phrase));

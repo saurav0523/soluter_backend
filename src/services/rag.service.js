@@ -156,7 +156,7 @@ const retrieveContext = async (question, documentId = null, options = {}) => {
       const neighborsToEval = neighborChunks.slice(0, expandNeighborsCount);
       const neighborTexts = neighborsToEval.map(n => n.content);
 
-      const neighborEmbArray = await embedService.generateEmbeddings(neighborTexts);
+      const neighborEmbArray = await embedService.generateEmbeddings(neighborTexts, 'retrieval.passage');
 
       for (let i = 0; i < neighborsToEval.length; i++) {
         const n = neighborsToEval[i];

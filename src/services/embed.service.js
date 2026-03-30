@@ -23,7 +23,7 @@ const normalizeEmbedding = (embedding) => {
   return embedding.map(v => (Number(v) || 0) / norm);
 };
 
-const generateSingleEmbedding = async (text) => {
+const generateSingleEmbedding = async (text, task = 'text-matching') => {
   const USE_CLOUD_EMBEDDINGS = process.env.USE_CLOUD_EMBEDDINGS === 'true';
   const HF_API_KEY = process.env.HF_API_KEY;
   const HF_EMBEDDING_MODEL = process.env.HF_EMBEDDING_MODEL || 'nomic-ai/nomic-embed-text-v1';
@@ -40,7 +40,7 @@ const generateSingleEmbedding = async (text) => {
       body: JSON.stringify({
         input: text,
         model: 'jina-embeddings-v3',
-        task: 'text-matching',
+        task: task,
         dimensions: 768,
       }),
     });
@@ -75,26 +75,27 @@ const generateSingleEmbedding = async (text) => {
   }
 };
 
-const generateEmbeddings = async (chunks) => {
+const generateEmbeddings = async (chunks, task = 'retrieval.passage') => {
   try {
     if (!chunks || chunks.length === 0) {
       return [];
     }
 
     if (chunks.length === 1) {
-      const cached = await redisCache.getCachedEmbedding(chunks[0]);
+      // For single chunks, we include the task in the cache key to avoid collisions
+      const cacheKey = `${chunks[0]}:${task}`;
+      const cached = await redisCache.getCachedEmbedding(cacheKey);
       if (cached) {
         return [cached];
       }
 
-      const embedding = await generateSingleEmbedding(chunks[0]);
-      await redisCache.cacheEmbedding(chunks[0], embedding);
+      const embedding = await generateSingleEmbedding(chunks[0], task);
+      await redisCache.cacheEmbedding(cacheKey, embedding);
       return [embedding];
     }
 
     const embeddings = [];
     const batches = [];
-    const errors = [];
     
     for (let i = 0; i < chunks.length; i += OPTIMAL_BATCH_SIZE) {
       batches.push(chunks.slice(i, i + OPTIMAL_BATCH_SIZE));
@@ -102,14 +103,15 @@ const generateEmbeddings = async (chunks) => {
 
     const processBatch = async (batch) => {
       const batchPromises = batch.map(async (chunk) => {
-        const cached = await redisCache.getCachedEmbedding(chunk);
+        const cacheKey = `${chunk}:${task}`;
+        const cached = await redisCache.getCachedEmbedding(cacheKey);
         if (cached) {
-          return { embedding: cached };
+          return { embedding: cached || [] };
         }
 
         try {
-          const embedding = await generateSingleEmbedding(chunk);
-          await redisCache.cacheEmbedding(chunk, embedding);
+          const embedding = await generateSingleEmbedding(chunk, task);
+          await redisCache.cacheEmbedding(cacheKey, embedding);
           return { embedding };
         } catch (error) {
           console.error(`Embedding generation failed for chunk: ${error.message}`);
